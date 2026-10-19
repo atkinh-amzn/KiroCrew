@@ -175,6 +175,7 @@ from kiro_crew.mrkdwn_title import slack_title_text  # noqa: F401 - read by the 
 from kiro_crew.parent_turns import note_turn_landed, settle_turn
 from kiro_crew.permission_floor import OUTCOME_REJECTED_TRANSPORT_FLOOR
 from kiro_crew.platform import current_context
+from kiro_crew.platform.context import redact_log_via_context
 from kiro_crew.providers.base import (
     EVENT_COMPLETE,
     EVENT_PERMISSION_REQUEST,
