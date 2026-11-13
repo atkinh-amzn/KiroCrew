@@ -335,6 +335,50 @@ class TestHandshakeNeverDefer:
         assert wire["neverDefer"] == []
 
 
+class TestHandshakeCodeIntelligence:
+    """KAS creates a session's ``code`` tool only when ``initialize`` enables
+    ``codeIntelligence``, so every KAS handshake must still carry it after the
+    spawn fills the rest of the settings channel."""
+
+    _ON = {"enabled": True}
+
+    def _caps(self, monkeypatch, *, tool_search, telemetry_on=True):
+        from kiro_crew.acp import kas_secret_storage, runtime_spawn_launch
+
+        monkeypatch.delenv(MANDATORY_MCPS_ENV, raising=False)
+        monkeypatch.setattr(kas_secret_storage, "persistence_enabled", lambda: False)
+        monkeypatch.setattr(runtime_spawn_launch, "_known_server_tool_names", {}.get, raising=False)
+        monkeypatch.setattr(
+            "kiro_crew.acp.kas_cli_settings._warn_opt_out_unconfirmed", lambda: None
+        )
+        rt = AcpRuntime(acp_backend=ACP_BACKEND_KAS)
+        rt._agent_env_override = {}
+        rt._kas_telemetry_override = telemetry_on
+        rt._tool_search = ToolSearchSettings(True, 5, 50_000) if tool_search else None
+        rt._projected_spawn_spec = lambda: {"tools": ["tool_search", "@kirocrew-core"]}
+        return asyncio.run(runtime_spawn_launch._handshake_client_capabilities(rt))
+
+    @pytest.mark.parametrize("telemetry_on", [True, False])
+    def test_tool_search_off_still_enables_code_intelligence(self, monkeypatch, telemetry_on):
+        kiro = self._caps(monkeypatch, tool_search=False, telemetry_on=telemetry_on)["_meta"][
+            "kiro"
+        ]
+        assert kiro["settings"] == {"codeIntelligence": self._ON}
+        assert kiro["telemetryEnabled"] is telemetry_on
+        assert kiro["openExternalUrl"] is True
+        assert kiro["userInput"] is True
+
+    @pytest.mark.parametrize("telemetry_on", [True, False])
+    def test_tool_search_on_keeps_code_intelligence_beside_it(self, monkeypatch, telemetry_on):
+        kiro = self._caps(monkeypatch, tool_search=True, telemetry_on=telemetry_on)["_meta"]["kiro"]
+        assert set(kiro["settings"]) == {"codeIntelligence", "toolSearch"}
+        assert kiro["settings"]["codeIntelligence"] == self._ON
+        assert kiro["settings"]["toolSearch"]["enabled"] is True
+        assert kiro["telemetryEnabled"] is telemetry_on
+        assert kiro["openExternalUrl"] is True
+        assert kiro["userInput"] is True
+
+
 class TestKnownServerToolNames:
     def test_a_crew_server_is_never_imported_into_the_gateway(self, monkeypatch):
         """Its declaration module sits in an agent-writable package, so the
@@ -376,7 +420,10 @@ class TestKnownServerToolNames:
 class TestWithClientMetaSettings:
     def test_fills_the_channel_and_keeps_the_declaration(self):
         out = with_client_meta_settings(KAS_CLIENT_CAPABILITIES, {"toolSearch": {"enabled": True}})
-        assert out["_meta"]["kiro"]["settings"] == {"toolSearch": {"enabled": True}}
+        assert out["_meta"]["kiro"]["settings"] == {
+            "codeIntelligence": {"enabled": True},
+            "toolSearch": {"enabled": True},
+        }
         assert {k: v for k, v in out.items() if k != "_meta"} == {
             k: v for k, v in KAS_CLIENT_CAPABILITIES.items() if k != "_meta"
         }
@@ -385,7 +432,9 @@ class TestWithClientMetaSettings:
         before = json.dumps(KAS_CLIENT_CAPABILITIES, sort_keys=True)
         with_client_meta_settings(KAS_CLIENT_CAPABILITIES, {"toolSearch": {"enabled": True}})
         assert json.dumps(KAS_CLIENT_CAPABILITIES, sort_keys=True) == before
-        assert KAS_CLIENT_CAPABILITIES["_meta"]["kiro"]["settings"] == {}
+        assert KAS_CLIENT_CAPABILITIES["_meta"]["kiro"]["settings"] == {
+            "codeIntelligence": {"enabled": True}
+        }
 
     def test_empty_settings_is_an_equal_copy(self):
         out = with_client_meta_settings(KAS_CLIENT_CAPABILITIES, {})
