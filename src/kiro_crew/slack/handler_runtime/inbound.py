@@ -893,11 +893,26 @@ async def route_linked_thread(
         return LinkedRoute.REFUSED
 
     _linked_slot_key = _linked_slot.key
+    # Who wrote the text this slot is about to carry, for the code-channel
+    # dispatch exemption: it admits a channel-origin turn only while every author
+    # on record is the Slack owner (``is_owner``; this one passed
+    # ``is_allowed_user`` above, which only lets the text in).
+    from kiro_crew.dashboard.session_control_parts.code_channel_exemption import (
+        note_channel_sender,
+    )
+
+    note_channel_sender(_linked_slot, user_id)
     # Redact for UI display only — LLM receives original text so it can process
     # user intent fully (redaction strips URLs/creds that may be relevant
     # context). The LLM's own output is redacted before display.
     _safe_text, _ = redact_exfiltration_urls(text)
     _safe_text, _ = redact_credentials(_safe_text)
+    # circular import: the dashboard package imports the Slack handlers.
+    from kiro_crew.dashboard.slot_buffers import flush_restored_hold
+
+    # A hold a restart restored into this idle slot is owed to this message's
+    # turn, above its user row. A running slot keeps it for that turn's seams.
+    flush_restored_hold(_linked_slot, logger=logger)
     # Nothing rendered this Slack-typed row optimistically in the dashboard, so
     # broadcast_user=True: append delivers the ONE identity-carrying frame
     # (a frame without ``meta.mid`` lets a client receiving the row through a

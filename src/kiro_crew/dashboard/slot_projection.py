@@ -132,6 +132,10 @@ def live_trust_scope(slot: Any) -> str:
         return ""
     if not yolo_policy_permits():
         return ""
+    from kiro_crew.dashboard.approval_posture import remote_scope_denied
+
+    if remote_scope_denied(scope):
+        return ""
     return scope if safety_override().scope_remaining_secs(scope) > 0 else ""
 
 
@@ -302,6 +306,7 @@ class SlotProjection:
         strip_options: Callable[[str], str],
         parse_cls_meta: Callable[[str], dict | None],
         is_turn_interrupted: Callable[[list[dict]], bool],
+        is_interruption_stale: Callable[[list[dict], float], bool],
         is_system_notice: Callable[[str, dict], bool],
         latest_transcript_ts: Callable[..., str | None],
         last_message_preview: Callable[[str], str],
@@ -412,6 +417,9 @@ class SlotProjection:
         )
         needs_input = bool(slot._question_pending)
         interrupted = not turn_in_flight and is_turn_interrupted(rows)
+        # Still `interrupted` for the row and the composer; only the bulk Resume
+        # leaves it out (the sidebar's count and `collect_interrupted_idle`).
+        interrupted_stale = interrupted and is_interruption_stale(rows, time.time())
 
         pending_approval_info: dict[str, str] | None = None
         if slot_pending:
@@ -574,6 +582,7 @@ class SlotProjection:
             "waiting_for_input": waiting_for_input,
             "needs_input": needs_input,
             "interrupted": interrupted,
+            "interrupted_stale": interrupted_stale,
             "stop_state": slot._stop_state,
             "wait_state": slot._wait_state,
             "created": slot.created_at,

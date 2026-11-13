@@ -24,6 +24,25 @@ Use **Settings → Secrets** in the dashboard. The panel lists the names it hold
 adds a new entry, and deletes one. It never shows a stored value back to you —
 listing returns names only, so a screenshot of the panel leaks nothing.
 
+With **Secrets vault redesign** turned on in **Settings → Developer → Feature
+Previews**, the tab changes shape. The left list holds every entry the vault
+knows, grouped into the credentials Kiro Crew uses by name and your
+own; picking one opens it on the right. **Add secret** asks what you are
+storing first: a **Secret** (one value, an API key or token), a **Login** (a
+website sign-in: username, password, the sites it belongs to) or a **Note**. The pane shows the `secret://` references
+to paste, and lets you replace or delete the entry. **Used by** lists what
+reads the entry now: MCP servers (their `env`, or an owner-added server's
+sign-in), `.env` credential keys, scheduled jobs' approved grants, the
+`agent.deepseek_env`, `agent.strands_env` and `tunnel.relay_lease_credential`
+settings, Connections cards' sign-ins, the Bitbucket Server, Linear, Jev and
+OpenTelemetry integrations, `kirocrew secrets authorize` approvals and Sprites
+profiles. **No use found** means none of those reads it, which is how you spot
+a likely stale entry; it is not proof, since a feature not on that list can
+still read an entry by name. It never shows a stored
+value back to you: a login lists its username and websites, nothing else, so a
+screenshot of the panel leaks nothing. On a phone the list is the page and a
+row opens its pane.
+
 If a value fails to save, the form keeps what you typed rather than clearing it,
 so you do not have to fetch the credential again.
 

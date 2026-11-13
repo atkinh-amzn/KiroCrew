@@ -243,6 +243,10 @@ export default [
       // measurement), no human-facing copy. Same parser-only boundary and same
       // false-negative class as widgetSrcdoc.ts above: keep it parser-only.
       'src/lib/widgetHeightReporter.ts',
+      // The fragment-scroll script injected beside the height reporter: ONE
+      // template literal of in-iframe JS (postMessage + scroll geometry), no
+      // human-facing copy. Same false-negative class: keep it parser-only.
+      'src/lib/widgetFragmentScroll.ts',
       'src/lib/mcpAppSrcdoc.ts',
       // Same parser-only boundary as the srcdoc builders above: this module
       // sanitizes model markup and injects CSP, a DOCTYPE and theme CSS. None
@@ -1035,6 +1039,11 @@ export default [
               // exempt, and the sentences AROUND it stayed in the catalog (that is
               // what `{{provider}}` is for).
               '^(GitHub|GitLab|Azure DevOps|Bitbucket|Bitbucket Server|Gerrit)$',
+              // The Connections page's one Google entry: the bare brand is its
+              // settings-search suffix (`settingsManual.ts`), the same in every
+              // language, like the provider names the other OAuth app entries
+              // take from the registry. Whole-value-anchored like the entries above.
+              '^Google$',
               // The local editor brands the "Open in {{editor}}" row names
               // (utils/remoteEditorUrl.ts `REMOTE_EDITORS`): a product name, the same in
               // every language. Whole-value-anchored like the entries above.

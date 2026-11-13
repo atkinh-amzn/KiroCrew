@@ -810,15 +810,20 @@ def _notice_steer_upgrade(state: "DashboardState", slot: "_ChatSlot", client: An
     key names it lost, never a value. One more on a KAS session told to turn telemetry
     off, since Crew cannot confirm the engine applied it; a chat shows that one once
     (``_telemetry_notice_is_new``). One more on a claude session that runs in Default
-    instead of the Auto it asked for, naming the ways back."""
+    instead of the Auto it asked for, naming the ways back. One more on a codex
+    session whose spec declares ``"tools": []``, which Crew enforces only at the
+    permission request. One more on a session whose adapter release has a known
+    problem a newer release fixes (``KNOWN_LIMITATIONS``)."""
     for name in (
         "steer_upgrade_notice",
         "agent_prompt_upgrade_notice",
         "tested_version_notice",
+        "known_limitation_notice",
         "withheld_credentials_notice",
         "telemetry_unconfirmed_notice",
         "kiro_cli_model_notice",
         "mode_pinned_notice",
+        "zero_tool_ban_notice",
     ):
         notice = getattr(client, name, "")
         if not (isinstance(notice, str) and notice):

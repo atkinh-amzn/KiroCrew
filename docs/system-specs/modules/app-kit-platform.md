@@ -769,6 +769,10 @@ Issue Radar's gate (`test/test_core_issue_radar_decoupling.py`) pins the rows
 that still name it; its three agent tools are its own, declared in its manifest and
 served by its own route through the `agentTools` seam (section 30.1; `issue-radar.md`,
 "Repository boundary").
+Notes' gate (`test/test_core_md_notebook_decoupling.py`) pins the rows that still name
+it: the masks, stubs, sweeps and moves for its earlier state layouts, which core keeps
+for a host still holding them, and the security-posture row for its error middleware
+(`md-notebook.md`, "State Layout").
 
 ## 0. Three-axis classification: origin, resources, lifecycle
 
@@ -973,8 +977,12 @@ listing has fetched, so it describes the fetch that built or held back the rows
 just listed). `refresh_registries` reports the
 same cause as `reason` on a failed row, for every cause but `other`, with the row's
 `host`, and every failed row's `cached`. The store page renders `registryStatus` as one notice
-(`registryListingFailureMessage` in `components/appstore/registryRefreshMessage.ts`)
-that leads with one remedy per cause and host, then names the registries whose apps
+(`registryListingFailureMessage` in `components/appstore/registryRefreshMessage.ts`).
+When the same listing answers `catalogUnavailable: true` (the offline fallback,
+below), the notice opens with `pages.appsPage.store_catalog_unreachable` on its own
+line, so the first load says the shelf holds only the bundled seed rows, before any
+refresh. The registry part
+leads with one remedy per cause and host, then names the registries whose apps
 are missing and the ones shown as last synced, one line each: connect to the VPN or check the
 network for `dns`, `network` and `timeout`; run `ssh <host>` once to add or fix its
 entry in `~/.ssh/known_hosts` for `host_key`; renew the git credentials for `auth`;
@@ -1323,9 +1331,27 @@ servers:
   `mcpServers`, `tools`, `allowedTools`, `prompt`. Each is derived from the
   manifest, the per-app policy, or the running install — a stale value is a bug,
   not a preference.
-- **Everything else on disk wins**: `model`, `description`, extra
-  `toolsSettings`… it can only be there because the user put it there. Preserved
-  keys are logged so the reason a template change did not appear is visible.
+- **Everything else on disk wins when the user owns it**: `model`, `description`,
+  `toolsSettings`, `excludedTools`, `permissions`… The previous registration wrote
+  the template's own values there too, so each registration keeps a **template
+  record** beside the spec, `<app>--<agent>.template` (`_template_record`): what it
+  wrote from the template for these keys. A value on disk that still equals the
+  record follows the new template, which may also drop the key. Any other value is
+  the user's (`_user_owned_agent_keys`) and is kept, and the record leaves that key
+  out from then on, so a later template that happens to equal the user's value and
+  then changes it again cannot take it back. A spec with no record (written before
+  records existed) keeps every value on disk, and those keys stay the user's from
+  then on. Preserved keys are logged so the reason a template change did not appear
+  is visible.
+
+The record is not `.json`, so kiro-cli and every spec scan skip it. It sits in the
+agents directory, which the sandbox seals read-only like the spec, and is written
+after the spec, under the same lock, only when the spec write succeeded. A failed
+record write leaves the previous record, so a value that write took from a changed
+template reads as the user's next time and is kept. `_deregister_agents` removes the
+record with the spec. The prune of an agent a new version dropped removes only the
+spec; its record stays until the app is disabled or uninstalled and is ignored
+meanwhile, because with no spec beside it there is nothing to compare.
 
 The prior file is snapshotted BEFORE the replace (the write path unlinks a legacy
 symlink first, so reading afterwards would find nothing). An unreadable prior file
@@ -1346,16 +1372,20 @@ Pinned by `test_an_update_keeps_an_agent_file_it_cannot_rewrite` and
 `test_an_update_that_needs_consent_leaves_no_agent_file`.
 
 This keeps a user's `model` or `description` across a registry update, a pin-follow
-of an adopted former built-in, or a local update. Disable and re-enable still start
-from the template: a disabled app keeps no agent file, so the same is true when an
-update newly asks for `sessionApproval` and suspends the app. No route passes
+of an adopted former built-in, or a local update, and brings a template value the
+user did not change up to the new version. Pinned by
+`test_an_update_refreshes_what_the_user_did_not_edit` and
+`test_an_edit_stays_the_users_when_a_later_template_matches_it`. Disable and
+re-enable still start from the template: a disabled app keeps no agent file, so the
+same is true when an update newly asks for `sessionApproval` and suspends the app.
+No route passes
 `register_app`'s `prior_agent_configs` (a `snapshot_app_agent_configs` taken before
 a deregister that deletes the files).
 
 Writer: `apps/bridges_agents.py::_register_agents`, `_preserve_user_agent_edits`,
-`_read_agent_config`; the update route `apps/routes_install.py::handle_update_app`
-with `apps/routes_lifecycle.py::_reinstall_from_registry` and
-`_prune_dropped_resources`.
+`_template_record`, `_read_agent_config`; the update route
+`apps/routes_install.py::handle_update_app` with
+`apps/routes_lifecycle.py::_reinstall_from_registry` and `_prune_dropped_resources`.
 
 ## 4. A generated prompt is pinned through the app's policy
 
@@ -3334,9 +3364,10 @@ keeps the saved copy's rows, less the catalog-only `git` rows only a fresh fetch
 can make installable. Only with no fresh document does the memory make
 `load_official_catalog` answer from the seed without a fetch.
 
-That degradation is silent -- once the saved document expires, a failed fetch
-leaves the seed listing with no error -- so the store header carries a manual
-refresh. `POST /api/app-store/refresh` (`handle_registry_refresh`) drops the
+That degradation raises no error. Once the saved document expires, a failed
+fetch leaves the seed listing, still answered 200 and flagged only by
+`catalogUnavailable: true`, which the store's listing notice shows on load. To
+repair it, the store header carries a manual refresh. `POST /api/app-store/refresh` (`handle_registry_refresh`) drops the
 on-disk caches of all three published documents (catalog, category order,
 editorial) via each module's `forget_cache()`, which clears a stale document and
 the `_fetchFailedAt` back-off memory. The handler never fetches: the follow-up
@@ -5505,10 +5536,56 @@ the app imports the host module), and keeps the dashboard client as a builtin.
 alone covers every endpoint the panel calls, that an external panel's writes go through
 the app's transport, and the request bodies.
 
+Code Review Sage's wheel copy declares `/api/source/pull-request` in its own
+`permissions.api` (owner ruling of 2026-11-13 on #26967, comment 6841699202: an app
+gets what its built-in already uses, declared in the wheel copy first so adoption is
+no widening). The built-in page reads and writes that family today: the panel's members
+above, plus the publish bar's `pending-review` and `submit-review`
+(`components/DraftReviewActions.tsx`). The one bare entry is the narrowest the matcher
+allows for them, and it also covers `status/refresh`, a read of the same cached
+statuses. The page's request carries the owner's session, and the handlers refuse an
+app token (`source_providers._authorize_owner_request`), so the app's backend token
+gains no reach. A built-in approves what its wheel copy ships at every start, so the
+app repository's copy, which declares the same list, adopts with `permission_refusal`
+None. Pinned by `test/test_code_review_sage_permission_parity.py`.
+
 Writers: `website/src/app-sdk/PullRequestPanel.tsx`, `website/src/app-sdk/index.ts`,
 `website/public/vendor/kirocrew-app-sdk.mjs`, `website/src/components/pullRequestClient.tsx`,
 `website/src/components/PullRequestPanel.tsx`, `website/src/components/CommentThreads.tsx`,
 `website/src/app-sdk/sdkLevel.ts`, `apps/app_sdk_level.py`.
+
+## 18h. The issue list reaches an app through the SDK, behind the declared list
+
+`useIssues`, `IssueList` and `IssueCard` on `@kirocrew/app-sdk`
+(`website/src/app-sdk/issues/`) list the issues `POST /api/source/issues` returns, through
+one query shape (`IssueSearchRequest`) and one row shape (`IssueSummary`,
+`website/src/types/index.sources.ts`). The views draw GitHub, GitLab, Jira and Linear
+rows, all four of which the route serves. They are App Kit seam level 6.
+
+The transport is chosen the way §18g chooses the pull-request client, from the
+published identity: an **external** app posts through its scoped client once
+`apiPathAllowed` covers `/api/source/issues`; a **builtin** page uses the dashboard's
+`api.fetchIssues`; **no identity** is the refusal. The refusal is an
+`AppApiPermissionError` from the hook, rendered by `IssueList` as an `ErrorNotice`
+naming the path, and the query stays disabled, so no request is sent. The matcher
+stops at a slash boundary, so `/api/source/issue` (one issue) does not admit the list.
+
+`useIssues` is a `useInfiniteQuery` keyed by the query minus `cursor`, with the
+response's `nextCursor` as the page parameter: a changed query or filter starts again
+from the first page. `IssueList`'s filter bar edits a copy of its `query` prop (state,
+assignee including `me`, labels, text), and a new prop replaces the edits.
+
+Provider strings are rendered as React text with `dir="auto"`. Every link and avatar
+url passes `safeHttpUrl` (http(s), no userinfo) before it becomes an `href` or `src`;
+a row whose url fails it renders without a link. The two views load behind a
+`React.lazy` boundary for the reason §18g gives. `AppSdkIssues.test.tsx` pins the three
+transport answers, the singular-path refusal, paging and its reset, both views for all
+four providers, and the text and url rules.
+
+Writers: `website/src/app-sdk/issues/`, `website/src/app-sdk/index.ts`,
+`website/public/vendor/kirocrew-app-sdk.mjs`, `website/src/api/client/sourceControl.ts`,
+`website/src/types/index.sources.ts`, `website/src/app-sdk/sdkLevel.ts`,
+`apps/app_sdk_level.py`.
 
 ## 19. Spec Builder's backend is composed by lifecycle owner
 
@@ -5576,7 +5653,8 @@ dashboard state on first use, and `DashboardState` declares neither.
 `test/core_app_independence.py` scanner. The only core strings left naming the app are
 a pinned list that may only shrink: the `security_posture.py` rows classifying its
 backend modules, and the docs lint's runtime-data row for
-`trust/spec-builder-decisions.json`, which [security](security.md) cites. Its
+`apps/spec-builder/data/trust/spec-builder-decisions.json`, which [security](security.md)
+cites. Its
 dashboard half is `website/src/apps/spec-builder/specBuilderBoundary.test.ts`: outside
 `src/apps/spec-builder/`, only `apps/builtinRegistry.ts` imports the UI, and the
 page's tests live beside it. The app's rows of core contracts are pinned in the app's
@@ -6707,14 +6785,17 @@ Writers: `apps/marketplace_install.py`, `apps/market_client.py`,
 
 ## 32. App Kit seam level 1: what a former built-in needs, offered to every app
 
-An installed app reaches the host only through its context and the dashboard SDK,
-never through a `kiro_crew` import or a dashboard source path: such an import pins the
-app to one wheel's private layout and breaks silently on the next upgrade. Level 1 is
+An installed app reaches the host only through its context, the dashboard SDK and the
+public backend SDK package (§40), never through another `kiro_crew` import or a
+dashboard source path: such an import pins the app to one wheel's private layout and
+breaks silently on the next upgrade. Level 1 is
 the set of seams a built-in's code needed from core, published generically. Nothing in
 any of them names an app. `APP_SDK_LEVEL` is one integer on both sides
 (`apps/app_sdk_level.py`, `website/src/app-sdk/sdkLevel.ts`), pinned equal by
 `test/test_app_sdk_level_mirror.py`. Level 2 adds `ctx.lifecycle` (§32b) and the SDK's
-pull-request panel (§18g). An app reads `ctx.sdk_level` or the SDK export to detect an
+pull-request panel (§18g); level 6 adds the SDK's issue list (§18h); level 7 adds the
+manifest's `agentReadOnlyDirs` (§39) and the backend SDK package (§40); level 8 adds
+`permissions.bots` (§32c). An app reads `ctx.sdk_level` or the SDK export to detect an
 older host and degrade, instead of failing on a missing attribute.
 
 **Structural routes.** `RouteRegistry` reads each item a `routes` hook returns through
@@ -6926,9 +7007,9 @@ Writers: `apps/lifecycle_sdk.py`, `apps/context.py`, `apps/app_sdk_level.py`,
 `test/test_app_sdk_level_mirror.py`. App authors: `docs/app-kit/api-reference.md`
 "App lifecycle".
 
-## 32c. App Kit seam level 6: an app reads and wakes the Bots the owner gave it
+## 32c. App Kit seam level 8: an app reads and wakes the Bots the owner gave it
 
-Every Crew Members route refuses an app token with a 404 (`_deny_app_caller`). Level 6
+Every Crew Members route refuses an app token with a 404 (`_deny_app_caller`). Level 8
 opens three of them to an app, and only this far. An app passes two checks, both in
 `handlers/members_access._app_bot_gate`, and every failure is the same 404, so an app
 cannot tell a Bot it was not given from one that does not exist:
@@ -6998,7 +7079,7 @@ memory, so a restart drops both.
 token (`POST /api/apps/{name}/token`), which every gate here applies to. The
 dashboard SDK has no Bot hooks: a dashboard page holds the owner's session, not an app
 token. They come back once a gateway relay gives an app page its own identity.
-`APP_SDK_LEVEL` is 6 on both sides: level 6 means an app may declare
+`APP_SDK_LEVEL` is 8 on both sides: level 8 means an app may declare
 `permissions.bots` and call these routes with its app token. The Crew API draft's
 `/v1/crew/bots` carries the same shapes, so only the paths change when the routes move
 there.
@@ -7140,10 +7221,14 @@ ties the shipped pins to the structural route registry (`route_registry._route_f
 level field, so the tool never picks a level above 1 itself. It reads the pinned tree
 for the seams above level 1 it uses (`_seam_level_uses`): `agentTools`,
 `permissions.agentTurns` and `permissions.workerAutoApprove` in `app.json` (level 2),
-`credentialMasks` (level 3), and `ctx.turns`, `ctx.untrusted`, `ctx.lifecycle` or
+`credentialMasks` (level 3), `agentReadOnlyDirs` (level 7), and `ctx.turns`,
+`ctx.untrusted`, `ctx.lifecycle` or
 `ctx.auto_approve` in any `.py` file outside a `tests/` directory, a `test_*.py` or a
 `conftest.py` (level 2), and `ctx.app_token` or `ctx.gateway_origin` there (level 5), read as an attribute of a context-named receiver or as a
-`getattr`/`hasattr` of that name on any receiver. A level below the highest one found
+`getattr`/`hasattr` of that name on any receiver, and the backend SDK package in
+any form in such a file (level 7): the file names both `kiro_crew` and the word
+`backend_sdk`, which catches a dotted import, `from kiro_crew.apps import
+backend_sdk`, an attribute of an imported parent and a string lookup alike. A level below the highest one found
 is refused, naming what was found, by `compute` and `verify` alike, so a tree that
 feature-detects a seam and degrades still pins at that seam's level, and a host
 without it keeps the wheel copy. The scan errs wide: a false hit only asks for a
@@ -7803,8 +7888,10 @@ data-home root, outside its data directory, so they keep their core rows until t
 store moves under `apps/ops-mission-control/data/` (#32681; see `ops-mission-control.md`,
 "Repository boundary").
 
-**Seam level.** The masks are level 3 (level 4 adds §30.1's tool keys and level 5
-`ctx.app_token` and `ctx.gateway_origin`): an app that stores a credential reads `ctx.sdk_level` and, below 3, knows nothing masks
+**Seam level.** The masks are level 3 (level 4 adds §30.1's tool keys, level 5
+`ctx.app_token` and `ctx.gateway_origin`, level 6 §18h's issue list, level 7 §39's
+`agentReadOnlyDirs`, and level 8 §32c's `permissions.bots`):
+an app that stores a credential reads `ctx.sdk_level` and, below 3, knows nothing masks
 the file.
 
 Writers: `apps/credential_masks.py`, `apps/manifest.py`, `apps/app_sdk_level.py`,
@@ -7885,6 +7972,225 @@ Writers: `apps/git_install.py`, `cli_commands_app.py` (`_resolve_install_source`
 Pinned by `test/test_app_install_git.py`. Its two git spawns are not sandboxed,
 since the clone needs the operator's SSH agent, `~/.ssh` and credential helpers,
 and are listed with that justification in `test/spawn_audit_helpers.py`.
+
+## 39. An app's agent-read-only directories are declared in its manifest (seam level 7)
+
+An app that keeps state an agent must not rewrite declares the directories in `app.json`:
+`"agentReadOnlyDirs": ["notes", "trust"]`. Each entry is a path relative to the app's
+data directory, so it names `apps/<name>/data/<entry>` under the data home. Driver
+decision 3 of 2026-11-09 on #26967 (delegated by the maintainer): a generic,
+tightening-only seam, the app's own data directory only, the same shape and limits as
+`credentialMasks` (§37).
+
+**One engine.** `apps/agent_readonly_dirs.py` reads the declaration with
+`apps/credential_masks.py`'s engine under its own `DeclarationKind` (key
+`agentReadOnlyDirs`, record suffix `-agent-readonly-dirs.json`). So the grammar
+(`entry_error`), the 32-entry cap, the sources (every shipped package's `app.json` and
+every installed `apps/<dir>/app.json`, the name taken from where it sits), the
+per-manifest cache, the two spellings (`apps/<name>/data/<entry>` and the lifecycle's
+`apps/.<name>-data-tmp/<entry>`) and the retained record are §37's, unchanged. The
+lifecycle refreshes the record at the same three points (`_write_installed`
+best-effort, `update_app` and a keep-data `uninstall_app` strictly, before the data
+moves). `AppManifest.validate` refuses a bad entry, `signing_payload` covers a non-empty
+declaration (sorted; absent when empty) and `to_dict` and the built-in snapshot keep it.
+The two declarations never read each other's records. One cross-check joins them: an
+entry at or beneath one of the same manifest's `credentialMasks` files is refused
+(`agent_readonly_dirs.mask_conflict_errors`), because a mask names a file and the sandbox
+creates an absent read-only directory, and `_establish_app_readonly_dirs` never creates
+one there for a manifest that skipped validation.
+
+**The tool gate.** `security.paths.sensitive_write_path_refusal` adds every declared
+spelling, under both `_CREW_HOME_PREFIXES`, to the rows it matches
+(`_app_readonly_dir_rows`), so an agent's file-edit tool is refused under each declared
+directory exactly as under a `_WRITE_PROTECTED_HOME_PATHS` row, with the same `$HOME`
+anchoring, `KIROCREW_HOME` re-anchoring and symlink resolution. The read gate does not
+read a declaration, so the directory stays readable. Listing the declarations scans
+`apps/` and stats each manifest, so no caller lists them on its own thread:
+`security.paths_targets._app_readonly_dir_rows` takes the listing on the `mc-pathres`
+threads within the anchor rebuild's budget, on the event loop and on the permission and
+tool-gate workers alike. A listing that misses the budget refuses the write as a stall
+does, and stays the only one in flight: later checks refuse at once while it runs rather
+than wait on it again or start another. The event loop reuses a listing for one second; any other thread takes a new
+one unless one is in flight. The reuse only delays a declaration just added; a running
+agent's sandbox reads them at its spawn anyway.
+
+**The OS sandbox, every mode.** `sandbox_argv._live_plan_host` adds every declared
+spelling (both data-home prefixes and a relocated home) to the crew-home `READONLY`
+targets, and its parents to the seal parents, so each one is sealed exactly as a core
+`READONLY` leaf is: a read-only bind on Linux, a `file-write*` and `file-link` deny on
+Seatbelt, with every parent guarded against rename on both (the namespace launcher pins
+the ones the uid could rename; Seatbelt denies a write to each literal entry). A
+declared spelling a mask covers stays masked (the namespace plan keeps a mask over a
+seal, and Seatbelt's rules are denies only), so a declaration cannot unmask a core leaf.
+Before every spawn, `sandbox_aliases._establish_app_readonly_dirs` refuses
+(`SandboxCeilingUnsealable`) when a link sits at a declared spelling in the live home or
+at a component between the data home and it, because a seal would land on what the link
+reaches while the name stays replaceable. On Linux it also creates an absent `data/`
+spelling inside an `apps/<name>/data` that is already a real directory, since `mount(2)`
+cannot seal an absent path and an agent could otherwise create it and write inside, and
+hands each one to the launcher as a required target with its identity. It never creates
+`data/` itself: the lifecycle reads an owned `data/` beside held-aside data as proof the
+held copy is stale, so a `data/` made by a spawn after an interrupted keep-data uninstall
+would have the next install delete the only copy (`_app_data_dir_settled`). It does not
+consult the move-aside name, which an agent can create. The staged spelling is never
+created. An absent app gets nothing created.
+
+**The app's own backend.** `sandbox_tiers.app_declared_readonly_targets(name,
+builtin=...)` returns the declared spellings minus any leaf that is, holds or sits
+beneath a core leaf of any disposition (`HIDDEN`, relocated `HIDDEN`, `READONLY`,
+`VISIBLE`), and minus any spelling beneath another mask or behind a planted link.
+`apps/backend.py` passes them as `extra_visible_dirs` to that app's backend spawn, and
+`_live_plan_host` leaves a declared seal off a spawn whose `extra_visible_dirs` names
+its exact spelling, both compared after folding a linked data-home spelling onto its
+canonical root (`sandbox_plan.fold_crew_home_alias`), as the namespace plan folds seals. That exact match is the only way a declared seal is lifted, and it
+lifts no core seal. The staged spelling is not handed back. An in-gateway backend (both
+built-ins below) runs outside every sandbox and is unaffected.
+
+**Residual.** §37's: the installed tree is sandbox-writable, so an agent that rewrites an
+installed app's `app.json` drops its declaration from the next spawn. A file inside a
+declared directory that already had a second hard link elsewhere before the seal is
+writable through that other name, as for a core `READONLY` directory. A link at a
+component below the data home refuses every sandboxed spawn on the host until it is
+replaced with a real directory, as for a credential mask. A Linux sandbox already running
+when the lifecycle moves the app's data (an update, a keep-data uninstall, an adoption)
+keeps its seals where it placed them: the move-aside spelling, absent at its spawn, is
+not sealed for it, and the data moved back into the new `apps/<name>` is reached through
+a parent its pinned seals (and a mask beneath them) are not attached under, until it
+respawns. New spawns seal what they find, and a Linux spawn made while
+`apps/<name>/data` is absent (the data held aside, or never created) finds an absent
+declared directory it does not create, so the tool gate is its only fence there until
+the data is back.
+Tracked in #33612, with `credentialMasks`' move-aside spelling.
+
+**Built-ins.** Meetings declares `notes` (its per-meeting user notes, `meetings.md`),
+which replaces the `_WRITE_PROTECTED_HOME_PATHS` row core carried for
+`apps/meetings/data/notes` with the same tool-gate fence plus the OS seal. Spec Builder
+declares `trust` and keeps its decision record at
+`apps/spec-builder/data/trust/spec-builder-decisions.json`. It was under the data home's
+`trust/` (the SEL trust root), whose read+write row stays for the SEL key. The backend
+settles the record once, the first time it finds the new path absent
+(`decisions._move_legacy_decisions`): it moves an existing record there, copy first and
+remove after, so a failure at either step keeps every answer, or writes an empty one when
+there is none, so a file an agent's shell plants at the old, sandbox-visible `trust/`
+afterwards is never imported. It reads the old record only as a regular file with one
+name: a symlink or a second hard link planted there makes the store unusable instead of
+copying its target into the agent-readable record. Agents may now read it, which the decision's "read but not
+write" names. A purge uninstall now
+removes the record with the app's data.
+
+**Seam level.** `agentReadOnlyDirs` is level 7. An app reads `ctx.sdk_level` and, below 7, knows
+nothing fences the directories: an older host ignores the key.
+
+Writers: `apps/agent_readonly_dirs.py`, `apps/credential_masks.py`, `apps/manifest.py`,
+`apps/discovery.py`, `apps/app_sdk_level.py`, `website/src/app-sdk/sdkLevel.ts`,
+`security/paths.py`, `security/paths_lists.py`, `security/paths_targets.py` (the tier
+name in the expiry log), `sandbox_aliases.py`, `sandbox_argv.py`,
+`sandbox_tiers.py`, `sandbox.py` (facade), `apps/backend.py`, `apps/manager_records.py`,
+`apps/manager_install.py`, `apps/manager_uninstall.py`, `scripts/adoption_pin.py`,
+`apps/builtins/meetings/app.json`, `apps/builtins/spec_builder/app.json`,
+`apps/builtins/spec_builder/backend/decisions.py`. Tests:
+`test/test_app_agent_readonly_dirs.py` (including a real Linux namespace spawn that
+gets `EROFS` writing a declared directory and keeps writing its sibling),
+`src/kiro_crew/apps/builtins/spec_builder/tests/test_routes_decision_ledger.py`.
+
+## 40. The backend SDK: public host controls for an app's own Python (seam level 7)
+
+The app repositories reach a set of private gateway names through their `_host.py`
+shims (in each repository's backend folder): a feature-detected string lookup per
+name, refused when absent. Each one is a gap that blocks deleting the wheel copy,
+because the name moves with the wheel. `kiro_crew.apps.backend_sdk` is the public, documented spelling of the
+most-used of them, grouped by control. It is a package of thin delegates: every name
+calls the private function the gateway itself enforces, looked up on its facade module
+at call time, so a check tightened later reaches the app with the wheel and nothing is
+a copy. Nothing in it names an app.
+
+**Reachable from both backend kinds.** An in-process app (`backend.hooks`) and a
+spawned one (`backend.entryPoint` started on the gateway's interpreter, which is the
+case once its dependencies are provisioned, §21) import it the same way. A spawned
+backend on its own venv interpreter has no `kiro_crew` and sees the package as absent,
+as it does on an older gateway. The package binds each name on first access
+(`__getattr__`), so an import loads nothing past the package roots and
+`apps.app_sdk_level`, and a spawned backend
+that wants one helper does not pay for the security stack.
+
+**What it offers, and the private name behind each.**
+
+| Group | Public name | Delegates to |
+|---|---|---|
+| Sensitive paths | `is_sensitive_path(path)`, `contains_sensitive_path(directory)` | `security.is_sensitive_path`, `security.path_contains_sensitive` |
+| Files | `read_bytes_nofollow(path, *, within_root, max_bytes, within_root_is_canonical)`, `FileTooLargeError` | `hooks.safe_read_file_bytes_nolink`, `hooks.FileTooLargeError` |
+| Files | `atomic_write(path, content, *, fsync, mode, newline, restrict_to_owner)`, `ensure_owner_only_dir(path)` | `atomic_write.atomic_write`, `owner_only_files.ensure_directory` |
+| Redaction | `scrub_outbound(text)`, `ScrubResult` | `apps.scrub_sdk.ScrubSDK.outbound` (the `ctx.scrub` pass) |
+| Audit | `audit_log(app_name=None)` | `apps.audit_sdk.AuditSDK` (the `ctx.audit` writer) |
+| Sandboxed children | `run_sandboxed`, `run_sandboxed_async`, `sandboxed_argv`, `sandboxed_argv_async`, `SandboxUnavailableError` | `sandbox.sandboxed_spawn_argv` then `sandbox.run_limited`; `sandbox.sandboxed_spawn_argv_async` then `sandbox.create_subprocess_limited`; the two preparations alone; `sandbox.SandboxUnavailableError` |
+| Process and locks | `IS_WINDOWS`, `IS_MACOS`, `IS_LINUX`, `IS_POSIX`, `kill_and_reap`, `is_link_or_junction`, `first_linked_ancestor`, `rmtree_force`, `file_lock` | the `platform_compat` names of the same spelling |
+
+**Same safety semantics.** A read refuses exactly what the private read refuses and
+raises the gateway's own `FileTooLargeError`; a spawn the host cannot sandbox raises
+the gateway's own `SandboxUnavailableError`. The exception classes are the private
+ones, not look-alikes, so an `except` written against either catches both.
+
+**No widening knob.** A public signature carries only the parameters the apps use, and
+never one that adds reach. `sandboxed_argv` accepts the `standard` and `strict` tiers
+and refuses any other value (`off` included) with `ValueError` before anything is
+prepared; the private chokepoint's `extra_*_dirs`, `first_party_fixed_argv` and
+`is_kiro_cli` lift a mask, open a write window in a sealed parent or reclassify the
+child, which is the gateway's decision for its own spawns, so they are not offered.
+The read has no `admit_hardlinked` or `canonical_gate`. The SDK spawns nothing that
+is not sandboxed: `run_sandboxed` and `run_sandboxed_async` prepare through the
+chokepoint and run under the resource limits in the same function, with the
+scrubbed environment and the cleanup path removed on every outcome, so
+`test/test_spawn_audit.py` sees both as routed. `run_sandboxed` forwards only the
+`subprocess.run` keywords in `spawn.RUN_KWARGS` (stdio, `cwd`, `timeout`, `check`,
+text decoding) and refuses every other one with `TypeError` before preparing,
+because `run_limited` and `subprocess.run` also take keywords that add reach:
+`profile="none"` lifts the resource limits, `executable` replaces the program the
+sandbox wrapper starts, and `pass_fds` / `close_fds` hand the child the caller's
+descriptors beyond its stdio. The async one starts the child in its own process group on POSIX
+(`start_new_session`) and reads that group id while the child is alive
+(`platform_compat._isolated_group_of_live_child`). On a timeout or a cancel it
+SIGKILLs that group before `kill_and_reap`, which does not group-kill a child it has
+already reaped: the id cannot name another group while any member of this one lives,
+so a descendant that outlived the child (`sh -c "work &"`) is reached too. A
+descendant that `setsid()`-ed away is outside the group. `run_sandboxed` kills the
+child on a timeout, its whole tree on Windows, but not a POSIX descendant that
+outlives it; its docstring and the api-reference row point such a child at the
+async form. The private limited spawners, which run whatever argv they are
+handed, are not offered. Nothing here is gated by a
+permission because nothing adds reach: the controls only refuse, redact, record or
+confine, and an in-process app could call the private names anyway.
+
+**Audit attribution.** `audit_log()` returns the `ctx.audit` writer for the name in
+`KIROCREW_APP_NAME`, which the gateway sets on every spawned backend, or for an
+explicit `app_name`. With neither it raises `LookupError` when the writer is built,
+so rows are never attributed to nobody, and `record` itself still never raises. The
+attribution is cooperative, as it is for `ctx.audit`. The SEL log is written
+cross-process under its chain lock (`sel_chain_lock`), so a spawned backend's row and
+the gateway's own interleave safely.
+
+**Level.** `SDK_LEVEL` is `APP_SDK_LEVEL`; `BACKEND_SDK_LEVEL` is 7, the level that
+publishes the package. The adoption pin tool counts any non-test source naming the
+package as a level-7 use (§33), so a tree that adopts it is held on a host without it.
+
+**Not in it yet.** The names the apps reach that this package does not cover stay
+private and keep their `_host.py` gap: chat slot and auto-nudge internals (they belong
+to the app-owned chat slot seam of ruling item 4), `pinned_fs` descriptor helpers,
+`link_unfurl` URL vetting, `messaging.raster.sniff_raster_mime`,
+`asset_downloader.download_to`, `executors.subprocess_executor`,
+`apps.registry.minimal_env`, `config.loader.config_dir` and `KiroCrewConfig`,
+`security.redact_local_paths`, `security.iter_credential_matches`,
+`atomic_write.read_bytes_with_retry`, `owner_only_files.mkdirs_owner_only` and
+`owner_only_opener_for`, `sandbox.effective_sandbox_mode`, and the domain modules
+(`crew_log`, `knowledge`, `deploy`, `transcribe`, `vector_memory`, `cron`,
+`notifications.bus`).
+
+Writers: `apps/backend_sdk/__init__.py`, `apps/backend_sdk/paths.py`,
+`apps/backend_sdk/files.py`, `apps/backend_sdk/redaction.py`,
+`apps/backend_sdk/audit.py`, `apps/backend_sdk/spawn.py`,
+`apps/backend_sdk/process.py`, `apps/app_sdk_level.py`,
+`website/src/app-sdk/sdkLevel.ts`, `scripts/adoption_pin.py` (`_seam_level_uses`).
+Pinned by `test/test_app_backend_sdk.py` and `test/test_builtin_adoption_pins.py`.
+App authors: `docs/app-kit/api-reference.md` § Backend SDK.
 
 ## Windows stale-backend cleanup capacity
 

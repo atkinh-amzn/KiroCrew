@@ -512,6 +512,12 @@ def _explain_batch(
         print(f"Cannot read the batch file: {reason}", file=sys.stderr)
         raise SystemExit(1) from None
     failed = False
+    # A UTF-8 BOM decodes to a leading U+FEFF; left on line 1 it makes that
+    # line's ``json.loads`` fail, so an editor that writes a BOM would turn the
+    # first request into an error record. Drop one leading BOM (never an
+    # interior one, which is real content inside a JSON string).
+    if text.startswith("\ufeff"):
+        text = text[1:]
     # Split on newlines only: splitlines() would also break a JSON string holding U+2028.
     for number, line in enumerate(text.split("\n"), 1):
         if not line.strip():
@@ -657,6 +663,8 @@ def _policy_fetch(*, force: bool) -> None:
     # "was refused", not "refused": the policy is the object of the refusal, not the
     # thing doing it.
     label = "was refused" if outcome.status == REFRESH_REJECTED else "could not be reached"
-    print(f"❌ The central policy {label}: {outcome.detail}")
-    print("   The ceiling already in effect is unchanged.")
+    # On stderr, as `policy source` and `policy validate` report their failures, so a
+    # config-management run that surfaces only stderr sees why the command exited 1.
+    print(f"❌ The central policy {label}: {outcome.detail}", file=sys.stderr)
+    print("   The ceiling already in effect is unchanged.", file=sys.stderr)
     raise SystemExit(1)

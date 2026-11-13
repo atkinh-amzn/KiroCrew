@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
+import copy
 import hashlib
 import inspect
 import json
@@ -609,7 +610,9 @@ class _RunContext:
         call_index = self._counter.count - 1
         agent_id = f"a{call_index}"
         use_phase = phase or self._current_phase
-        call_label = label or _fallback_label(prompt)
+        # str(): a script can pass a non-string prompt (a dict row, a number); the
+        # label is display-only, and the call's own try records what agent_fn does.
+        call_label = label or _fallback_label(str(prompt))
         self._record(
             self._stream.agent_started(
                 self.now,
@@ -1289,7 +1292,10 @@ class WorkflowRunner:
         # 2. Build the run context + restricted exec namespace.
         ctx = _RunContext(
             run_id=run_id,
-            args=args,
+            # The script's own copy: it may edit ``ctx.args`` as scratch state, and
+            # the run record, its ``run_started`` event and a rerun keep the args
+            # the run was launched with.
+            args=copy.deepcopy(args),
             now=now,
             owner_dm=owner_dm,
             stream=stream,
@@ -1439,9 +1445,16 @@ class WorkflowRunner:
                 agent_errors=dict(ctx.agent_errors),
                 source=source,
             )
-        except Exception as exc:  # script raised — captured, not propagated
+        except BaseException as exc:  # script raised — captured, not propagated
+            # ``BaseException`` is in the script's builtins, so a script can raise
+            # one. A closing coroutine must not await, so it goes straight up; an
+            # interrupt or exit of this process is recorded first, then goes up.
+            if isinstance(exc, GeneratorExit):
+                raise
             await _pre_terminal()
             emit(stream.run_failed(now, error=repr(exc), where="exec"))
+            if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                raise
             return RunResult(
                 run_id,
                 ok=False,
@@ -1678,4 +1691,6 @@ class WorkflowRunner:
             fallback_title=fallback_title,
             fallback_folder_id=fallback_folder_id,
             admission_closed=admission_closed,
+            timeout_secs=self._timeout_secs,
+            budget_total=budget_total,
         )

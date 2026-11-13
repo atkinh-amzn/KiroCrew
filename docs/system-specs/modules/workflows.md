@@ -102,7 +102,7 @@ param-by-param (name, kind, default) and for async-ness by
 
 | Attribute | Type | Semantics |
 |-----------|------|-----------|
-| `args` | `dict` | the run's arguments, from `workflow_run` / the HTTP body |
+| `args` | `dict` | the run's arguments, from `workflow_run` / the HTTP body. The script gets its own deep copy, so editing `ctx.args` as scratch state never changes the args stored on the run, its `run_started` event, or what a rerun starts from |
 | `now` | `str` | a **fixed run-start stamp** supplied by the caller |
 | `owner_dm` | `str` | the owner's Slack DM target, the intended argument to `send_slack` |
 | `budget` | `Budget` | token accounting (below) |
@@ -159,6 +159,11 @@ Semantics, from `runner._RunContext.agent`:
   recorded in `agent_errors[call_index]` and on the `agent_finished` event's
   `error` field. A dead agent therefore does not fail the run
   (`test_workflows_runner.py::test_failed_agent_resolves_to_none_not_run_failure`).
+  That holds for a non-string prompt too (a dict row, a number): the display
+  label is built from `str(prompt)`, and the prompt reaches `agent_fn` unchanged
+  inside the per-call `try`. The admitted wrapper (`agent_pool.admitted_agent_fn`)
+  records `prompt_chars` as `len(str(prompt))`, measured before it takes a runner
+  lane slot, so a non-string prompt cannot raise while the slot is held.
 - Three distinguishable `None` reasons are recorded, because "no payload" alone
   makes a post-mortem impossible: `"agent returned no result"`, `"no schema-valid
   result after bounded re-asks"`, and an exception rendered by
@@ -550,7 +555,7 @@ agent_finished, run_finished`.
 | `author` | author-in-run raised, or produced no valid script |
 | `validate` | static validation failed, or the script references a ctx primitive this host did not wire |
 | `ceiling` | wall-clock timeout, `BudgetExceeded`, or the per-run agent-call cap |
-| `exec` | the script itself raised |
+| `exec` | the script itself raised, a `BaseException` included (it is in the script's builtins); the background driver also marks the run `failed` on one, so a script's `BaseException` no longer leaves the run `running` with a Cancel that reports success on nothing. A cancel still ends the run `cancelled`; a process `KeyboardInterrupt` or `SystemExit` is recorded, then re-raised; a `GeneratorExit` (a coroutine being closed) is re-raised with nothing awaited |
 | `interrupted` | the script returned, but a `ctx.agent()` step's turn was stopped from outside (`WorkflowStepInterrupted`); `error` is that step's error |
 
 ### Persistence of the stream
@@ -820,7 +825,8 @@ entry is dropped. The built-in Workflows app's `/run` handler returns its result
 `RunHandle` holds `run_id`, `name`, `status`, the growing `events` list, `result`,
 `error`, `author`, `session_key`, `source`, `args`, `agent_results`,
 `agent_errors`, exact saved-definition provenance, optional `derived_from`
-ancestry, and the driving `task`. Statuses: `running`, `paused`, `finished`,
+ancestry, the launch limits `timeout_secs` and `budget_total` (stored, and read
+back as `None` from an older record that lacks them), and the driving `task`. Statuses: `running`, `paused`, `finished`,
 `failed`, `cancelled`; `running` and `paused` are active states.
 
 Two distinct serializations:
@@ -1408,7 +1414,8 @@ remains an exact saved invocation and cannot be promoted into a duplicate or
 appended as a revision. An
 edited rerun clears that saved-definition identity because its submitted source
 is no longer the exact saved revision, and keeps the former id and revision only
-as `derived_from` ancestry; any later rerun carries that ancestry forward.
+as `derived_from` ancestry; any later rerun carries that ancestry forward. A rerun also runs under the prior run's own `timeout_secs` and
+`budget_total`; a `timeout_secs` the caller passes still wins.
 
 TaskRunner applies the same rule to saved task plans. A user edit or automatic
 replan clears the run's exact definition id, slug, and revision before publishing

@@ -56,7 +56,11 @@ from kiro_crew.apps.routes_lifecycle import (
     _start_backend_after_install,
     _suspend_app_for_session_approval_reconsent,
 )
-from kiro_crew.apps.update_notify import deliver_app_update_notes, prepare_app_update_notes
+from kiro_crew.apps.update_notify import (
+    deliver_app_update_notes,
+    prepare_app_update_notes,
+    resolve_app_update_notes,
+)
 from kiro_crew.config.loader import (
     ConfigReadError,
     KiroCrewConfig,
@@ -93,6 +97,18 @@ async def _announce_app_updates(request: web.Request, rows: list[dict[str, Any]]
         deliver_app_update_notes(state, notes)
 
 
+async def _resolve_app_update_notes(request: web.Request, rows: list[dict[str, Any]]) -> None:
+    """Mark read the update notes these rows show installed.
+
+    Called with the seed fallback's rows too, unlike the announce: what it
+    reads is the INSTALLED version, which comes from the local install record
+    whichever source built the row.
+    """
+    state = request.app.get("state")
+    if state is not None:
+        await resolve_app_update_notes(state, rows)
+
+
 def _registry_fetch_failures() -> list[dict[str, Any]]:
     """``{"name", **fetch status}`` for each registry in force whose latest index fetch failed.
 
@@ -122,6 +138,7 @@ async def handle_registry(request: web.Request) -> web.Response:
         await _announce_app_updates(request, apps)
     else:
         apps = await list_registry()
+    await _resolve_app_update_notes(request, apps)
     # Said out loud for the same reason: a registry whose index fetch failed adds
     # no rows, or only its last-synced ones, to a listing that still answers 200.
     # A report on the listing, so a failure to read it never fails the listing.
@@ -220,7 +237,7 @@ async def handle_registry_install(request: web.Request) -> web.Response:
         return denied
     try:
         body = await request.json()
-    except json.JSONDecodeError:
+    except (LookupError, RecursionError, ValueError):
         return web.json_response({"error": "invalid JSON"}, status=400)
     not_object = body_not_object_error(body)
     if not_object is not None:
@@ -325,6 +342,7 @@ async def handle_registry_install_stream(request: web.Request) -> web.StreamResp
     from kiro_crew.dashboard.handlers._shared import (
         body_not_object_error,
         require_owner_dashboard_request,
+        string_field_error,
     )
 
     denied = await require_owner_dashboard_request(request, "app_registry_install")
@@ -332,13 +350,17 @@ async def handle_registry_install_stream(request: web.Request) -> web.StreamResp
         return denied
     try:
         body = await request.json()
-    except json.JSONDecodeError:
+    except (LookupError, RecursionError, ValueError):
         return web.json_response({"error": "invalid JSON"}, status=400)
     not_object = body_not_object_error(body)
     if not_object is not None:
         return not_object
 
     name = body.get("name", "")
+    # Before the stream opens, as the non-stream route does: a non-string name
+    # otherwise reached the install as a 200 stream ending in a Python TypeError.
+    if (wrong_type := string_field_error("name", name)) is not None:
+        return wrong_type
     if not name:
         return web.json_response({"error": "app name required"}, status=400)
 

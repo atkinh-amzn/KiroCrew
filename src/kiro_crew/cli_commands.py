@@ -873,6 +873,7 @@ if TYPE_CHECKING:  # every owner-defined name in _EXPORTS, for type checkers and
         _remove_deleted_agent_leftovers,
     )
     from kiro_crew.cli_commands_app import (  # noqa: F401
+        _DASHBOARD_REMEDY_BY_ACTION,
         _MEMBER_THREADS_DESC,
         _SESSION_APPROVAL_CONSENT_REQUIRED,
         _SESSION_APPROVAL_DESC,
@@ -955,6 +956,7 @@ if TYPE_CHECKING:  # every owner-defined name in _EXPORTS, for type checkers and
         _memory_carve,
         _memory_cmd,
         _memory_create_store,
+        _memory_dream,
         _memory_forget,
         _memory_search_embedding,
         _memory_search_history,

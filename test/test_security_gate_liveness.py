@@ -778,7 +778,30 @@ def _url_payload_command(n: int) -> str:
 #: Raised by 5, from 35,534, for the ``update-staging`` entry in the home fence: the
 #: self-update engine's wheel staging directory moved out of ``trust/`` to its own
 #: top-level masked leaf, and the file-tool gate covers it as it covered ``trust/``.
-_PACKAGE_LINE_BUDGET = 35_539
+#: Raised by 98, from 35,539, to 35,637, for the target-set build reading each folder
+#: once: ``_child_realpath.realpaths_sharing_folders`` (the batch walk the resolver
+#: child and the in-process build share), the build's shared path spellings in
+#: ``paths_targets._anchor_targets``, and the comment above the expiry saying what one
+#: build observes. Same set, less work. Re-measured.
+#: Raised by 75, from 35,637, to 35,712, for ``call_views``: the per-call memo
+#: ``is_denied`` opens, in a leaf module with ``once_per_call`` on the pure readers one
+#: judgement repeats (shell tokens, program basename, operand, self-program test, line
+#: fold, Python lexer, quoted scripts). Same verdicts, less work. Re-measured.
+#: Raised by 92 more, from 35,712, in ``paths_resolver``: the test that confines the
+#: cumulative wait allowance to a thread running an event loop, and
+#: ``bounded_judgment``, one shared budget of resolver wait that every off-loop
+#: request checks before it is sent and that clamps only candidate waits; and the
+#: three lines the ``paths`` facade's manifest lists for them. No check was relaxed.
+#: Raised by 20, from 35,804, to 35,824, for ``StreamRedactor.release_sentence_end`` in
+#: ``text_redaction``: a withheld run that is one plain word ending a sentence can be
+#: committed before the next chunk arrives. No pattern, pass or commit boundary moved.
+#: Raised by 77, from 35,824, to 35,901, for ``paths_targets._app_readonly_dir_rows``
+#: and its facade manifest rows: the write gate's listing of the apps'
+#: ``agentReadOnlyDirs`` rows runs on the ``mc-pathres`` threads within the anchor
+#: rebuild's budget for every caller and is reused for a second on the event loop, so
+#: no gate scans ``apps/`` on its own thread. A miss refuses, and refuses later callers
+#: at once while that listing is still in flight. Re-measured.
+_PACKAGE_LINE_BUDGET = 35_901
 
 #: Ceiling on any ONE file in the package. This is what the bound is really for --
 #: a package total says nothing about a single file growing back into a second

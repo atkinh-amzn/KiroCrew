@@ -2332,8 +2332,11 @@ Notes moves focus to the back control (New schedule focuses its own form), so
 Escape still pops the page, and popping returns focus to the control that opened it.
 
 The Bots page's SidePanel visibility has two flags, one per placement
-(`panelChrome`). Docked beside the thread, it reads the persisted
-`mc-members-panel-open` (`usePersistedBool`, default shown), and the header's
+(`panelChrome`). Docked beside the thread, each Bot keeps its own choice under
+`mc-members-panel-open:<name>`; a Bot with no choice of its own reads the bare
+`mc-members-panel-open` (`usePersistedBool`, default shown), which no toggle
+writes. A toggle writes only the open Bot's own key, and another window's
+toggle reaches this one through the `storage` event. The header's
 panel opener is withdrawn while the docked panel is open, because the panel's
 own strip carries the close control. As an overlay it reads a separate
 per-visit flag that starts closed and is reset whenever the panel docks, and
@@ -2846,11 +2849,15 @@ draft guard, so a veto neither remounts the card nor loses its pushed form.
   it does today, so the goal is still written by the Bot and approved by the
   user, and no route changes. Only a `dispatched` or `queued` receipt closes the
   modal and a floating profile card, so the reply is in view; a docked one
-  stays. A refusal keeps the modal open with the failure notice; `unknown`,
-  `response-late` and `transport-error` keep it open with the shared
-  unconfirmed-delivery notice: check the conversation before sending again. No
-  outcome automatically resends; the button is disabled with no thread to send
-  to. The editor page stays for an EXISTING goal: its row opens the text, Save
+  stays. A refusal keeps the modal open with the failure notice and the button
+  for another try; `unknown`, `response-late` and `transport-error` keep it
+  open with its own unconfirmed notice (`goals_new_goal_unconfirmed`: open the
+  chat and check the conversation before sending again; no composer claim, the
+  modal has none), and the button becomes **Open chat**: it sends nothing and
+  leaves the way a delivered send does, so pressing it again never sends the
+  message the first press may already have posted. No outcome automatically
+  resends; Send is disabled with no thread to send to, Open chat never is. The
+  editor page stays for an EXISTING goal: its row opens the text, Save
   and Remove goal. Create a goal ALWAYS opens the modal, with no branch on the
   Bot's tools: every Bot's chat holds `set_goal` (a Bot on its
   own file chats on the conductor, which the gateway builds with
@@ -3365,7 +3372,12 @@ gateway), and
 `dashboard/waiting_changed` when `waiting_items` differs from the last list
 recorded, checked after each growth of that DM log (`emit.add_growth_listener`,
 coalesced for 0.4 s; only a session's first growth in that window walks the open
-slots to learn which thread it is, and a retired question looks its slot up by key), folded as `waiting` (`items`, `count`, `omitted`, `newest`). The list
+slots to learn which thread it is, and a retired question looks its slot up by key), folded as `waiting` (`items`, `count`, `omitted`, `newest`). A change card
+that expires writes nothing to that log, so each record arms one timer per thread
+for its soonest open card's `expires_at` that reads the list again as a retired
+question does (after 60 s instead when a card is past its expiry but still open, or
+the append that emptied the list has not committed); the timer does not survive a
+gateway restart. The list
 reads the change-card store, and the settle runs on the serving loop, so each
 settle first awaits `CardStore.warm()` (the file and vault-key read in a worker
 thread); when warming fails nothing is recorded, so the last complete list stands

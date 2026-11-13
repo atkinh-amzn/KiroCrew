@@ -1433,11 +1433,14 @@ _EXPECTED_STRICT_CALL_SITE_LABELS: dict[str, list[tuple[str, str]]] = {
     "kiro_crew/agent_materialization/conductor_agents.py": [
         ("conductor_spec_regeneration", "unknown"),
     ],
-    # The pre-spawn repairs of the knowledge and guest specs compare Crew's own spec
-    # against its template; a link at the name is screened before it is followed.
+    # The pre-spawn repairs of the knowledge, guest and lite specs compare Crew's own
+    # spec against its template; a link at the name is screened before it is followed.
     # Each repair names its own operation.
     "kiro_crew/agent_materialization/service_agents.py": [("forward:operation", "unknown")],
     "kiro_crew/crewmate_prune_migration.py": [("crewmate_prune", "dashboard")],
+    # Settings → Secrets lists the MCP servers whose env references each item; a
+    # spec that fails to read marks the scan incomplete instead of reading empty.
+    "kiro_crew/dashboard/handlers/secrets_usage.py": [("secrets_usage", "dashboard")],
     "kiro_crew/dashboard/handlers/sessions_parts/tool_policy.py": [
         ("session_tool_policy", "dashboard"),
         ("session_tool_policy", "dashboard"),

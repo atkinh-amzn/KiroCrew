@@ -410,7 +410,10 @@ delay the bind past the desktop app's gateway-wait window. A failed revive leave
 `was_connected` true and records the failure reason, so the entry persists showing
 why it is down. A crew whose `disabled` flag is set is skipped with its
 `was_connected` intact, and one chained behind a disabled crew is refused by
-`connect()` and spawns nothing.
+`connect()` and spawns nothing. A gateway restart or stop that lands mid-revive
+stops it at the next instance, with every remaining `was_connected` left set: the
+restart's pre-exec seam and the stop's cleanup hook have already torn the tunnels
+down, so one connected after that would outlive the gateway.
 
 **The same supervisor without a gateway: `kirocrew desktop tunnel`.** The desktop
 app's client-only mode runs no local gateway, so nothing above is running there,
@@ -844,8 +847,18 @@ what its own edit invalidated, and never reopens anything on the user's behalf.
 - **Loopback-only forwards.** `ssh -N -L 127.0.0.1:<local>:127.0.0.1:<remote>`,
   with `AddressFamily=inet` to avoid an unexpected `::1` bind, `BatchMode=yes`
   so a missing credential fails fast instead of prompting, and
-  `ExitOnForwardFailure=yes` so a forward that cannot bind is a detected failure
-  rather than a silent hang. `-N` without `-f` is deliberate: `-f` would fork ssh
+  `ExitOnForwardFailure=no` so a `LocalForward` the user's ssh_config adds for
+  the host on another port, already held by their own ssh session, cannot end
+  the tunnel. The tunnel's own forward failing to bind is still a detected
+  failure rather than a silent hang: ssh names that port on stderr
+  (`cannot listen to port: <n>`, kept on by the `LogLevel=INFO` pin), and the
+  stderr drain ends the child on it, at connect or later, so the connect fails
+  or self-heal runs with the same
+  `ssh forward bind failed` error; a line naming another port neither ends the
+  child nor classifies a later exit as a bind failure, while a forward the
+  ssh_config adds on the tunnel's own port number prints the same line and
+  counts as the tunnel's own.
+  `-N` without `-f` is deliberate: `-f` would fork ssh
   into the background and leave the gateway unable to supervise or kill the real
   forwarder. The multiplexing pins in §9 close the same hole from the
   ssh_config side.
@@ -1241,8 +1254,9 @@ in the same coordinate space as its `clientWidth`.
 
 The only thing that varies per remote is the **SSH host** you configure: the hub
 always runs a fixed `ssh <ssh_host> ...` argv (`BatchMode=yes`,
-`ExitOnForwardFailure=yes`, `ServerAliveInterval=30`, `ServerAliveCountMax=3`,
-`AddressFamily=inet`, `ControlPath=none`, `ControlMaster=no`, `-L`/`-N`, plus `-C` <!-- wokeignore:rule=master -->
+`ExitOnForwardFailure=no`, `LogLevel=INFO`, `ServerAliveInterval=30`,
+`ServerAliveCountMax=3`, `AddressFamily=inet`, `ControlPath=none`,
+`ControlMaster=no`, `-L`/`-N`, plus `-C` <!-- wokeignore:rule=master -->
 when compression is on). Anything `ssh` can reach **non-interactively** works.
 `ssh_host` accepts `host`, `host.fqdn`, an `~/.ssh/config` alias, or
 `user@host`, and rejects any segment starting with `-` (ssh option-injection
@@ -1265,6 +1279,12 @@ first, so a pinned `-o` silently discards theirs. The two multiplexing pins are
 safe because a supervised tunnel must never share a connection, but the same
 move on, say, `IgnoreUnknown` would drop the pattern a cross-platform config
 relies on and turn a working setup into `Bad configuration option`.
+`ExitOnForwardFailure=no` and `LogLevel=INFO` also discard the user's values,
+and only for this child. The host block's `LocalForward`/`RemoteForward`/
+`DynamicForward` lines are inherited (only `ClearAllForwardings`, which also clears
+the tunnel's `-L`, could drop them), and with `yes` one of them already held
+elsewhere ended every connect. The child's stderr is read by the gateway alone, and
+the tunnel's own bind failure is read off it (§7), so its verbosity is pinned.
 
 The diagnostics probes are a different case and are left alone: they are
 one-shot commands whose exit status is the whole result, with no forward to own.
@@ -4158,7 +4178,15 @@ case-normalizing `is_incognito_transcript` (a peer is untrusted input, so
 `Incognito` refuses like `incognito`); that is the version-independent floor, and
 it costs nothing. And **`read` filters to
 `RECALL_ROLES`** before tail-capping, dropping the `system`/tool rows that
-`get_chat_session` also excludes. `read` additionally vets the `session_key` (no
+`get_chat_session` also excludes. The hub sends its `max_messages` to the peer with
+the read, and a peer that knows the parameter answers through
+`ConversationLog.derive_recent`, the read the local `get_chat_session` makes: the
+newest `max_messages` rows of `RECALL_ROLES` (role and content, task-brief rows left
+out, at most 200), taken from the end of the file under the same lock hold as the
+line's verdict. Its cost and its reply then follow the count and not the
+transcript's size. A peer from before the parameter ignores it and answers the
+whole transcript; the hub shapes either reply the same way, so a transcript over
+`PEER_SESSIONS_REPLY_MAX_BYTES` is refused only by such a peer. `read` additionally vets the `session_key` (no
 separator, no `..`) and percent-encodes it into the peer path so it cannot
 traverse — the same "validate then rebuild" discipline as the §6 proxy. The
 `list`/`read` proxy read is bounded by a total-time budget (`_CREW_PROXY_TIMEOUT`,

@@ -399,6 +399,14 @@
       "route": "/settings/channels/whatsapp?highlight=channels.how-the-agent-joins-in-whatsapp"
     },
     {
+      "id": "channels.let-code-channels-start-helper-agents-slack",
+      "label": "Let code channels start helper agents (Slack)",
+      "tab": "channels",
+      "route": "/settings/channels/slack?highlight=key%3Aslack.code_channel_dispatch",
+      "description": "Helpers work in the code channel's folder and ask you before changing files, unless that channel is set to approve automatically (Trust).",
+      "configKey": "slack.code_channel_dispatch"
+    },
+    {
       "id": "channels.messages-database-path-imessage",
       "label": "Messages database path (iMessage)",
       "tab": "channels",
@@ -1217,24 +1225,6 @@
       "hint": "Draw a cursor that glides to each target and pulses when it clicks, so you can follow along on screen. Purely visual — it changes nothing about what the agent is allowed to do, and it only appears for clicks that move the real pointer."
     },
     {
-      "id": "connections.client-id",
-      "label": "Client ID",
-      "tab": "connections",
-      "route": "/settings/connections?highlight=connections.client-id"
-    },
-    {
-      "id": "connections.client-secret",
-      "label": "Client secret",
-      "tab": "connections",
-      "route": "/settings/connections?highlight=connections.client-secret"
-    },
-    {
-      "id": "connections.client-secret-2",
-      "label": "Client secret",
-      "tab": "connections",
-      "route": "/settings/connections?highlight=connections.client-secret-2"
-    },
-    {
       "id": "connections.oauth-client-github",
       "label": "OAuth app",
       "tab": "connections",
@@ -1249,46 +1239,11 @@
       "description": "Client ID, client secret and redirect URI for a provider that needs a registered OAuth app"
     },
     {
-      "id": "connections.oauth-client-gmail",
+      "id": "connections.oauth-client-google",
       "label": "OAuth app",
       "tab": "connections",
-      "route": "/settings/connections?highlight=connections.oauth-client-gmail",
-      "description": "Client ID, client secret and redirect URI for a provider that needs a registered OAuth app"
-    },
-    {
-      "id": "connections.oauth-client-google-drive",
-      "label": "OAuth app",
-      "tab": "connections",
-      "route": "/settings/connections?highlight=connections.oauth-client-google-drive",
-      "description": "Client ID, client secret and redirect URI for a provider that needs a registered OAuth app"
-    },
-    {
-      "id": "connections.oauth-client-google-calendar",
-      "label": "OAuth app",
-      "tab": "connections",
-      "route": "/settings/connections?highlight=connections.oauth-client-google-calendar",
-      "description": "Client ID, client secret and redirect URI for a provider that needs a registered OAuth app"
-    },
-    {
-      "id": "connections.oauth-client-google-sheets",
-      "label": "OAuth app",
-      "tab": "connections",
-      "route": "/settings/connections?highlight=connections.oauth-client-google-sheets",
-      "description": "Client ID, client secret and redirect URI for a provider that needs a registered OAuth app"
-    },
-    {
-      "id": "connections.oauth-client-google-docs",
-      "label": "OAuth app",
-      "tab": "connections",
-      "route": "/settings/connections?highlight=connections.oauth-client-google-docs",
-      "description": "Client ID, client secret and redirect URI for a provider that needs a registered OAuth app"
-    },
-    {
-      "id": "connections.oauth-client-google-slides",
-      "label": "OAuth app",
-      "tab": "connections",
-      "route": "/settings/connections?highlight=connections.oauth-client-google-slides",
-      "description": "Client ID, client secret and redirect URI for a provider that needs a registered OAuth app"
+      "route": "/settings/connections?highlight=connections.oauth-client-google",
+      "description": "One Google OAuth client for Gmail, Drive, Calendar, Sheets, Docs and Slides"
     },
     {
       "id": "developer.agent-harness-for-worker-chats",
@@ -1318,7 +1273,7 @@
       "label": "Also send the conversation and tool-call inputs so Jev can score compaction",
       "tab": "developer",
       "route": "/settings/developer/feature-previews?highlight=developer.also-send-the-conversation-and-tool-call-inputs-so-jev-can-score-compaction",
-      "description": "Every time context fills up and {{productName}} compacts a session automatically, this sends that conversation and the inputs of the tool calls in it to Jev, and asks which ones would have been worth keeping. Tool OUTPUT is never sent — only how many characters it was. Passwords and keys are replaced before anything is sent. It is a measurement: the compaction happens exactly as it does now whatever Jev answers, and the answer appears as one line on the compaction notice. It is wider than sending one tool call's arguments — a whole session's conversation goes, not one call — so it is off until you turn it on, whatever else you have already agreed to."
+      "description": "Every time context fills up and Kiro Crew compacts a session automatically, this sends that conversation and the inputs of the tool calls in it to Jev, and asks which ones would have been worth keeping. Tool OUTPUT is never sent — only how many characters it was. Passwords and keys are replaced before anything is sent. It is a measurement: the compaction happens exactly as it does now whatever Jev answers, and the answer appears as one line on the compaction notice. It is wider than sending one tool call's arguments — a whole session's conversation goes, not one call — so it is off until you turn it on, whatever else you have already agreed to."
     },
     {
       "id": "developer.also-send-tool-call-arguments-so-jev-can-flag-risky-calls",
@@ -1399,14 +1354,6 @@
       "hint": "Lifts the chat that started a folder's other chats to the top of that folder: an accent bar down its left edge and a small conductor tag beside the agent name. This changes the order of the Sessions list, so the list stays as it is until you turn it on. The folder menu's chat item is always there."
     },
     {
-      "id": "developer.github-sign-in-by-kiro-crew",
-      "label": "GitHub sign-in by Kiro Crew",
-      "tab": "developer",
-      "route": "/settings/developer/feature-previews?highlight=developer.github-sign-in-by-kiro-crew",
-      "description": "Lets Kiro Agent chats use your GitHub profile, orgs and public repos. Turn it on, then connect GitHub in Customize > Connections.",
-      "hint": "Kiro Crew signs in to GitHub itself. Disconnect GitHub on Connections to remove access."
-    },
-    {
       "id": "developer.jev-api-key",
       "label": "Jev API key",
       "tab": "developer",
@@ -1420,6 +1367,14 @@
       "route": "/settings/developer/feature-previews?highlight=developer.mark-out-of-date-dashboard-fields",
       "description": "Marks bot-written Dashboard fields that are out of date.",
       "hint": "When a bot has not rewritten a field it writes on its Dashboard page for a day (or the field's own limit), the page marks that field with how long ago it was updated, and the bot is reminded to write it again in its next turn and check-in."
+    },
+    {
+      "id": "developer.mcp-sign-in-by-kiro-crew",
+      "label": "MCP sign-in by Kiro Crew",
+      "tab": "developer",
+      "route": "/settings/developer/feature-previews?highlight=developer.mcp-sign-in-by-kiro-crew",
+      "description": "Lets chats use MCP servers that Kiro Crew signs in to, such as GitHub, Asana, Google and servers you add. Turn it on, then connect them in Settings > Connections.",
+      "hint": "Kiro Crew signs in to MCP servers itself and passes the sign-in to chats on a harness it supports, such as Kiro Agent, Claude or Codex. kiro-cli chats sign in as before. Disconnect a server on Connections to remove access."
     },
     {
       "id": "developer.model-for-the-small-model-judge",
@@ -1458,6 +1413,13 @@
       "tab": "developer",
       "route": "/settings/developer/feature-previews?highlight=developer.run-kas-on-kiro-crew-s-own-engine",
       "description": "Uses the KAS engine version this Kiro Crew release was tested with, instead of the Kiro CLI. Applies to every new session on this Kiro Crew, not just this device. Signs in with your Kiro account from Settings → Agent Harness. Takes effect when Kiro Crew restarts."
+    },
+    {
+      "id": "developer.secrets-vault-redesign",
+      "label": "Secrets vault redesign",
+      "tab": "developer",
+      "route": "/settings/developer/feature-previews?highlight=developer.secrets-vault-redesign",
+      "description": "Shows Secrets as a list beside the open item, and lets you save logins and notes."
     },
     {
       "id": "developer.send-pending-approvals-to-chat-apps",
@@ -1955,10 +1917,10 @@
     },
     {
       "id": "security.config-pending",
-      "label": "Settings files changed outside {{productName}}",
+      "label": "Settings files changed outside Kiro Crew",
       "tab": "security",
       "route": "/settings/security/posture?highlight=security.config-pending",
-      "description": "Review edits made to settings files outside {{productName}}, then apply or discard them."
+      "description": "Review edits made to settings files outside Kiro Crew, then apply or discard them."
     },
     {
       "id": "security.trust-every-third-party-app",
@@ -1978,7 +1940,7 @@
       "label": "Your custom denies",
       "tab": "security",
       "route": "/settings/security/rules?highlight=security.your-custom-denies",
-      "description": "Add your own deny patterns (Python-compatible regex). These are enforced at {{productName}}'s PreToolUse gate alongside the built-in rules."
+      "description": "Add your own deny patterns (Python-compatible regex). These are enforced at Kiro Crew's PreToolUse gate alongside the built-in rules."
     },
     {
       "id": "session-environments.coder-url",

@@ -79,16 +79,17 @@ const UNMAPPED_PANELS: Record<string, string> = {
   'DecisionsProviderPicker.tsx': 'the Decisions card\'s provider choice writes a preset id, or a SageMaker endpoint\'s name, region and profile, through the owner-only PUT /api/decisions/provider, not a config path, so there is no configKey to index; it is reached through the card the developer.decisions-jev entry deep-links to',
   'ImportPanel.tsx': 'single action button launching the import wizard; no persistent settings',
   'InstanceFormFields.tsx': 'per-instance CRUD form fields (add/edit crew), not global settings',
-  'McpManagement.tsx': 'rendered in Customize → Connections → MCP Servers, not on a Settings tab — a settings deep link would be dead; its per-server switches are table rows keyed by server, not Settings* primitives',
-  'McpManagementAssessment.tsx': "McpManagement.tsx's read-only Sharing assessment view, rendered in Customize → Connections → MCP Servers, zero settings",
-  'McpManagementLaunchReview.tsx': "McpManagement.tsx's launch review and refused-row panels, per-server approvals rather than settings, rendered in Customize → Connections → MCP Servers",
-  'McpManagementHero.tsx': "McpManagement.tsx's hero, reload banner and approval card, rendered in Customize → Connections → MCP Servers, zero settings",
+  'McpManagement.tsx': 'rendered on the MCP Servers page (`/mcp`), not on a Settings tab — a settings deep link would be dead; its per-server switches are table rows keyed by server, not Settings* primitives',
+  'McpManagementAssessment.tsx': "McpManagement.tsx's read-only Sharing assessment view, rendered on the MCP Servers page (`/mcp`), zero settings",
+  'McpManagementLaunchReview.tsx': "McpManagement.tsx's launch review and refused-row panels, per-server approvals rather than settings, rendered on the MCP Servers page (`/mcp`)",
+  'McpManagementHero.tsx': "McpManagement.tsx's hero, reload banner and approval card, rendered on the MCP Servers page (`/mcp`), zero settings",
   'MobileLoginCard.tsx': 'mint-a-sign-in-link action card; the link it returns is a one-time credential, not a persistent setting',
   'OptionalSdkCard.tsx': 'read-only install-command card the Feishu, Teams and WhatsApp panels mount when their optional SDK is missing; zero controls, only a copy button',
   'PeoplePanel.tsx': 'read-only list of who has used this Crew and where access is managed; no setting and no control writes a config path',
   'PeopleCrew.tsx': 'the People share card, People list and the name-and-picture dialog; display-only edits and one-shot actions with their own routes, no setting and no control writes a config path',
   'PeopleModes.tsx': 'the per-mode pieces PeoplePanel mounts (invalid state, read-only Team Access, adapter notes); no setting and no control writes a config path',
   'PeopleAdvanced.tsx': 'the owner-only Advanced section of the People tab, which shows only under the Shared Crew preview; its controls write dashboard.shared_crew.* paths, but a search hit would deep-link to a tab that is hidden unless the preview is on, so they stay out of settings search',
+  'SecretUsage.tsx': "the Secrets item pane's read-only Used by card and the delete confirmation's in-use line; it lists where an item is used and holds no setting",
   'SharedAccessSetup.tsx': 'the People empty state shown while no shared-access path is configured; guidance and links to existing guides, no setting and no control writes a config path',
   'SsmInvite.tsx': 'the SSM tab of the People invite dialog and its row under Invites: a one-time link form with its own create and remove routes; no setting and no control writes a config path',
   'TailscaleInvites.tsx': 'the People invite dialog: a one-time invite form and the Tailscale credential connect field, both actions with their own Connect and Disconnect routes; no setting and no control writes a config path',
@@ -313,6 +314,12 @@ const WAIVED_BARE_CONTROLS: Record<string, { counts: BareCounts; reason: string 
       'settings search because the People tab is hidden unless the Shared Crew preview is on',
   },
   'SecretsPanel.tsx': {
+    counts: { Input: 6, textarea: 1 },
+    reason:
+      'add/edit form for one vault item (name, value, login fields, a website to add, note text) ' +
+      '— transient CRUD, not persistent knobs',
+  },
+  'SecretsPanelLegacy.tsx': {
     counts: { Input: 2 },
     reason: 'add-secret name/value form — transient CRUD, not persistent knobs',
   },
@@ -413,14 +420,6 @@ describe('settings coverage gate — bare controls', () => {
  * skipped"; this pins each one so a new silent skip fails the build.
  */
 const EXPECTED_DYNAMIC_SKIPS: Record<string, { count: number; reason: string }> = {
-  'ConnectionsPanel.tsx': {
-    count: 1,
-    reason:
-      'the shared-save switch on each Google card is labelled with the other Google ' +
-      'products the list returned ("Also save on Google Drive, …"), so there is no fixed ' +
-      'label; search reaches the card through the manual "OAuth app" entry, and the ' +
-      'switch sits inside that card',
-  },
   'BrowserLiveSection.tsx': {
     count: 1,
     reason:
@@ -442,6 +441,14 @@ const EXPECTED_DYNAMIC_SKIPS: Record<string, { count: number; reason: string }> 
       'one mute switch per enabled app, labelled with that app\'s own display name; ' +
       'the set of apps is whatever is installed, so there is no fixed label to index. ' +
       'The rows sit on the Notifications Sources page beside each app\'s channels',
+  },
+  'OAuthAppPanel.tsx': {
+    count: 4,
+    reason:
+      'one OAuth app part per Connections card: Client ID, Client secret (two shapes) and ' +
+      'the Google entry\'s "Also save on …" switch. The card may be closed, so a generic ' +
+      'entry would highlight a hidden field; settingsManual.ts indexes one OAuth app entry ' +
+      'per provider (and one for Google), and that highlight opens the card first',
   },
   'SessionEnvironmentsCard.tsx': {
     count: 8,
@@ -471,6 +478,12 @@ const EXPECTED_DYNAMIC_SKIPS: Record<string, { count: number; reason: string }> 
       'notifications.sound-category-*',
   },
   'SecretsPanel.tsx': {
+    count: 1,
+    reason:
+      'the managed pane labels its SecretField with the slot copy (managedLabel), the anchor ' +
+      'the settingsManual secrets.* entries highlight; one pane per transient credential slot',
+  },
+  'SecretsPanelLegacy.tsx': {
     count: 1,
     reason:
       'managed SecretField labels are selected from a closed kind-to-copy map and the ' +

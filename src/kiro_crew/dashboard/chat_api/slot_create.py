@@ -30,6 +30,7 @@ if TYPE_CHECKING:
         _ChatSlot,
         _coerce_requested_mode,
         _history_key_for,
+        _loading_refusal,
         _normalize_slot_key,
         _rebase_rehydrated_refresh_mark,
         _record_explicit_agent_selection,
@@ -616,6 +617,8 @@ async def api_chat_slot_create(request: web.Request) -> web.Response:
     # from; an omitted or degenerate name is always a mint. The creator fence
     # already read any saved cron state before this decision.
     _requested_key = _normalize_slot_key(str(name)) if name else ""
+    if _requested_key and (_refused := await _loading_refusal(request, state, _requested_key)):
+        return _refused
     reopening_persisted_cron = bool(
         cron_creator
         and _requested_key
@@ -1174,6 +1177,14 @@ async def api_chat_slot_create(request: web.Request) -> web.Response:
 
             creation_stack.push_async_exit(_unbind_retracted_worker)
             refusal = await bind_work_item(request, slot.key, work_item)
+            if refusal is None:
+                # Reserved before the first frame, so a person's mode pick on the
+                # newborn always lands after it and clears it; armed at the end.
+                from kiro_crew.dashboard.handlers.remote_work_item import (
+                    reserve_remote_trust,
+                )
+
+                reserve_remote_trust(slot, work_item)
             if refusal is not None:
                 if _retract_failed_newborn(state, slot):
                     await drained_to_thread(
@@ -1289,6 +1300,11 @@ async def api_chat_slot_create(request: web.Request) -> web.Response:
         created["headroom"] = headroom
     if work_item is not None:
         created["work_item_id"] = work_item.item_id
+        if work_item.trust:
+            # Armed only once the create stands, so a retracted worker never holds it.
+            from kiro_crew.dashboard.handlers.remote_work_item import grant_remote_trust
+
+            await grant_remote_trust(state, slot, work_item)
     return web.json_response(created)
 
 

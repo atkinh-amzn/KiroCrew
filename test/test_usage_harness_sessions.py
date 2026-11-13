@@ -192,3 +192,129 @@ def test_a_background_one_liner_is_no_turn_of_any_session(parse) -> None:
     r = run()
     # The kiro-cli transcript plus chat-9's one real turn.
     assert (r["total_sessions"], r["total_messages"]) == (2, 3)
+
+
+def test_sessions_of_a_harness_that_records_provider_acp_are_counted_by_harness(parse) -> None:
+    shards, run = parse
+    today = _noon(0)
+    _write_shard(
+        shards,
+        _day(today),
+        [
+            # Codex records provider acp, as kiro-cli does; its harness tells them apart.
+            _row(today, "acp", transcript="dashboard:chat-10-10", harness="codex"),
+            _row(today, "acp", transcript="dashboard:chat-10-10", harness="codex"),
+            _row(today, "acp", transcript="dashboard:chat-11-11", harness="pi"),
+            # kiro-cli and KAS are counted from their transcripts, never from rows.
+            _row(today, "acp", transcript="dashboard:chat-12-12", harness="kiro"),
+            _row(today, "acp", transcript="dashboard:chat-13-13", harness="kas"),
+            # A row from before the field: provider acp alone counts as before.
+            _row(today, "acp", transcript="dashboard:chat-14-14"),
+        ],
+    )
+    r = run()
+    # The kiro-cli transcript (1 session, 1 message), chat-10 (2 turns), chat-11 (1 turn).
+    assert (r["total_sessions"], r["total_messages"]) == (3, 7)
+
+
+def test_every_known_harness_is_counted_from_rows_or_from_its_transcripts() -> None:
+    # A harness added later must be placed: counted from its rows, or read from
+    # a transcript the parse knows. Leaving it in neither drops its sessions.
+    from kiro_crew.agent_sdk.backends import ACP_BACKENDS_KNOWN, backend_to_stored
+
+    transcript_counted = {"kiro", "kas"}
+    for backend in ACP_BACKENDS_KNOWN:
+        harness = backend_to_stored(backend)
+        assert (harness in store_mod._SHARD_COUNTED_HARNESSES) != (
+            harness in transcript_counted
+        ), harness
+
+
+@pytest.mark.asyncio
+async def test_the_usage_row_records_the_harness_of_the_session_it_ran_on(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(usage_mod, "_TOKEN_USAGE_DIR", tmp_path)
+    seen: list[object] = []
+    source = object()
+
+    def _harness_of(provider: object) -> str:
+        seen.append(provider)
+        return "codex"
+
+    monkeypatch.setattr(usage_mod, "harness_of", _harness_of)
+    await usage_mod.persist_token_record_async(
+        "chat-1-1", "m", {"input_tokens": 1}, provider="acp", model_source=source, emit_metric=False
+    )
+    (row,) = [json.loads(ln) for p in tmp_path.glob("*.jsonl") for ln in p.read_text().splitlines()]
+    assert seen == [source]
+    assert row["harness"] == "codex"
+
+
+def test_an_unresolved_harness_leaves_the_field_off_the_row() -> None:
+    now = _noon(0)
+    for harness in ("", "unknown"):
+        record = usage_mod._build_token_record(
+            "chat-1-1", "m", object(), "acp", now, harness=harness
+        )
+        assert "harness" not in record
+
+
+def test_each_run_of_a_cron_job_on_one_slot_is_its_own_session(parse) -> None:
+    shards, run = parse
+    today = _noon(0)
+    _write_shard(
+        shards,
+        _day(today),
+        [
+            # One cron job, one slot, three runs: three ACP sessions.
+            _row(today, "claude_code", slot="cron:nightly", acp_session_id="s-1"),
+            _row(today, "claude_code", slot="cron:nightly", acp_session_id="s-2"),
+            _row(today, "claude_code", slot="cron:nightly", acp_session_id="s-3"),
+            # Two turns of one conversation stay one session.
+            _row(today, "acp", slot="cron:hourly", harness="codex", acp_session_id="s-4"),
+            _row(today, "acp", slot="cron:hourly", harness="codex", acp_session_id="s-4"),
+        ],
+    )
+    r = run()
+    # The kiro-cli transcript, three nightly runs and one hourly conversation.
+    assert (r["total_sessions"], r["total_messages"]) == (5, 11)
+
+
+def test_a_row_from_before_the_session_id_still_groups_by_slot(parse) -> None:
+    shards, run = parse
+    today = _noon(0)
+    _write_shard(
+        shards,
+        _day(today),
+        [
+            _row(today, "claude_code", slot="cron:nightly"),
+            _row(today, "claude_code", slot="cron:nightly"),
+        ],
+    )
+    r = run()
+    assert (r["total_sessions"], r["total_messages"]) == (2, 5)
+
+
+@pytest.mark.asyncio
+async def test_the_usage_row_records_the_acp_session_of_its_turn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(usage_mod, "_TOKEN_USAGE_DIR", tmp_path)
+
+    class _Provider:
+        session_id = "acp-session-7"
+
+    await usage_mod.persist_token_record_async(
+        "cron:nightly", "m", {}, provider="acp", model_source=_Provider(), emit_metric=False
+    )
+    await usage_mod.persist_token_record_async(
+        "cron:nightly", "m", {}, provider="acp", emit_metric=False
+    )
+    # Day files in date order, so a run across midnight still reads oldest first.
+    rows = [
+        json.loads(ln)
+        for p in sorted(tmp_path.glob("*.jsonl"))
+        for ln in p.read_text().splitlines()
+    ]
+    assert [r.get("acp_session_id") for r in rows] == ["acp-session-7", None]
