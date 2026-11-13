@@ -29,6 +29,7 @@ import TrustAppModal, {
   isTrustDeniedError, localOnlyTrustRepository, SESSION_APPROVAL_CONSENT_REQUIRED, useTrustGate,
 } from '../components/appstore/TrustAppModal'
 import { isRegistrySourced } from '../components/appstore/types'
+import { desktopRequestOf } from '../components/appstore/desktopRequest'
 import { REGISTRY_STALE_MS, registryQueryFn } from './apps/useAppsData'
 import AppSource from '../components/appstore/AppSource'
 import { consentTierFor } from '../components/appstore/registryTier'
@@ -243,6 +244,11 @@ export default function AppDetailPage() {
 
   // Abort in-flight streaming install on unmount
   useEffect(() => () => { installAbortRef.current?.abort() }, [])
+  // A failed Retry refocuses the new Retry if focus fell to <body>; only the load Retry starts claims the press.
+  const retryRef = useRef<HTMLButtonElement>(null)
+  const retryPressed = useRef(false)
+  const [refocusRetry, setRefocusRetry] = useState(false)
+  useEffect(() => { if (!refocusRetry) return; setRefocusRetry(false); if (!document.activeElement || document.activeElement === document.body) retryRef.current?.focus() }, [refocusRetry])
 
   /**
    * Resolve the page's record. The three reads are independent, so they run at
@@ -259,6 +265,7 @@ export default function AppDetailPage() {
    */
   const load = useCallback(async ({ shareListing = false, keepView = false }: { shareListing?: boolean; keepView?: boolean } = {}) => {
     if (!name) return
+    const fromRetry = retryPressed.current; retryPressed.current = false; let failed = false
     // `keepView` refreshes in place: the loader would unmount the pressed button.
     if (!keepView) {
       setLoading(true)
@@ -526,9 +533,9 @@ export default function AppDetailPage() {
       }
       if (sideFailure) setError(sideFailure instanceof Error ? sideFailure.message : String(sideFailure))
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : i18nT('pages.appDetailPage.failed_to_load_app'))
+      failed = true; setError(e instanceof Error ? e.message : i18nT('pages.appDetailPage.failed_to_load_app'))
     } finally {
-      setLoading(false)
+      setLoading(false); if (fromRetry && failed) setRefocusRetry(true)
     }
   }, [name, clearError, queryClient])
 
@@ -733,6 +740,7 @@ export default function AppDetailPage() {
         memberThreads: app.manifest?.permissions?.memberThreads === true,
         workerAutoApprove: app.manifest?.permissions?.workerAutoApprove === true,
         reachableByUserSessions: app.manifest?.permissions?.reachableByUserSessions,
+        desktop: desktopRequestOf(app.manifest),
         retryInstalls: true,
         // The Update buttons funnel here too, over an app that is already there.
         replacesInstalled: app.installed === true,
@@ -871,6 +879,7 @@ export default function AppDetailPage() {
           memberThreads: app.manifest?.permissions?.memberThreads === true,
           workerAutoApprove: app.manifest?.permissions?.workerAutoApprove === true,
           reachableByUserSessions: app.manifest?.permissions?.reachableByUserSessions,
+          desktop: desktopRequestOf(app.manifest),
         })
       } else if (action === 'enable' && isSessionApprovalConsentRequiredError(e)) {
         // The grant changed under the dialog (an update added a scope it did not
@@ -929,7 +938,7 @@ export default function AppDetailPage() {
           {/* Nothing on this page is editable, so the hand-off loses nothing. */}
           <ErrorNotice message={error} askAgent />
           <div className="flex items-center gap-2">
-            {error && <Btn onClick={() => { void load() }}>{i18nT('pages.appDetailPage.retry')}</Btn>}
+            {error && <Btn ref={retryRef} onClick={() => { retryPressed.current = true; void load() }}>{i18nT('pages.appDetailPage.retry')}</Btn>}
             <Btn onClick={() => navigate('/apps')}><ArrowLeft size={14} /> {i18nT('pages.appDetailPage.back_to_apps')}</Btn>
           </div>
         </div>

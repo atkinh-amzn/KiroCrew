@@ -100,7 +100,7 @@ module imports the ACP layer. The rest lives in one owner per responsibility, lo
 | `config/loader_credentials.py` | Credential keys (`CRED_*`, `CREDENTIAL_KEYS`, named by [code-style](../common/code-style.md)), the `.env` reader and its decoder, `secret://` env resolution, the `kiro-cli` API-key injection, the dashboard port. |
 | `config/loader_locations.py` | The data-home and workspace path helpers (`config_path`, `config_local_path`, the per-feature state paths, `workspace_root`, `workspace_dir_from_entry`, `materialize_workspace_dir`), `read_local_secret`, and `read_merged_config_files`, the raw read for a reader that stays off the dataclass graph: it merges `config.local.json` over `config.json` as whole documents, as the loader does, before any section is read. |
 | `config/loader_document.py` | Document I/O: `_raw_config`, `read_config_for_update`, the publish floor, `write_config_atomically`, `update_config_locked` and its lock, the meta stamp, the unsandboxed-exec policy and `acp_backend_declared` read from the raw document, and the validated-document cache fingerprint. The config-writer scans exempt it with `loader_config.py` (`save`). |
-| `config/write_provenance.py` | The record of the latest `config.json` / `config.local.json` inode this gateway process published (read from the staged descriptor, held open), with its per-process nonce, read by the Linux launcher's pin (security.md). Written by `write_config_atomically`; logs under `kiro_crew.config.loader`. |
+| `config/write_provenance.py` | The record of the latest `config.json` / `config.local.json` inode this gateway process published (read from the staged descriptor, held open), vouched for from each file of the bounded run of its own saves that led to it, with its per-process nonce, read by the Linux launcher's pin (security.md). Written by `write_config_atomically`; logs under `kiro_crew.config.loader`. |
 | `config/loader_builders.py` | The load-time field readers, the security clamp and its SEL event, the agent, session, telemetry and dashboard `_build_*` helpers, the harness-choice mapping (`_read_backend_choice`, `_stored_agent_dict`, `_restore_stored_harness_fields`), and the loop-stall and managed-launch readers. |
 | `config/loader_snapshots.py` | Published snapshots (the materialized agents with their scan, refresh, dispatch and default-agent healer; the alias table; the compaction threshold; the timezone) and the resolvers that answer from them. Every `global` it rebinds has its one home here, served through the facade. |
 | `config/loader_agents.py` | Agent resolution: `resolve_crew_identity`, `resolve_agent_identity`, `resolve_agent_bindings`. |
@@ -134,13 +134,19 @@ without user namespaces (a container), the on-disk file is served as written. Ev
 device reads as removed). It is
 separate from the sibling `write_provenance.py`: that one pins the INODE
 identity for the Linux launcher, this one keeps the CONTENT the loaders parse. The copy is
-always a writer's published bytes; nothing endorses a file at rest. A file with no copy yet (one
-the gateway has not saved since this check shipped) is not pending and is served as written, as before this
-check; the gateway's first save of it endorses it (the known limit for such a file is in
+always a writer's published bytes, with one exception: the gateway's start endorses each
+protected file that has no copy yet (`adopt_unendorsed`), once, after the previous run's
+sessions are swept and before any session of the run, publishing the copy only while none
+exists (a hard link, so a save that endorses the file meanwhile keeps its own copy): only a
+regular file holding a JSON object stored as Kiro Crew writes one (no byte-order mark or carriage return, which the loaders'
+normalized read would never match). Any other file with no copy is not pending and is served as
+written until the gateway's first save of it endorses it or a later start adopts it (the known
+limit for such a file is in
 [security](../modules/security.md)). A file that differs from an existing copy is PENDING (`pending_changes`: leaf, on-disk signature,
 a changed-key diff with credential-bearing values withheld): it keeps loading as the endorsed
-copy until the owner applies or discards it in Settings > Security
-(`dashboard/handlers/config_pending.py`; apply re-endorses the on-disk document through
+copy until the owner applies or discards it in Settings > Security, or with `kirocrew config
+pending` where the gateway runs without the dashboard
+(`dashboard/handlers/config_pending.py`'s `resolve_pending`, which both call; apply re-endorses the on-disk document through
 `update_config_locked` / the denied-command saver / `enable_state.save_state`, discard writes
 the endorsed document back through the same writer; only these two pass
 `resolving_pending=True`). Any OTHER save of a pending file is refused before anything is
@@ -151,8 +157,8 @@ pending edit, which would then be lost. Saves of the other files are unaffected.
 save handlers answer that code (a handler with no catch of its own is answered `409` with it by
 the chain's `spa_fallback` layer, and one whose broad `except` would catch it hands it there
 after that arm's own rollback or audit) and the frontend shows its translation with a link to the
-pending card; the CLI prints the sentence and exits 1 (`cli.main`'s `_exit_on_pending_save`, for
-every subcommand); the migration write-back each load retries is refused too and logged once per
+pending card; the CLI prints the sentence, which names `kirocrew config pending` for a gateway
+without the dashboard, and exits 1 (`cli.main`'s `_exit_on_pending_save`, for every subcommand); the migration write-back each load retries is refused too and logged once per
 pending version (`log_writeback_refused_once`); an app uninstall whose grant would need
 that save is refused by its precondition (`trust_grant_removal_blocked`) before any destructive
 step, as are a trust revoke and turning blanket app trust off (`_preflight_agent_config_mutable`). Restore (`record` / `endorse_installed`) is not an ordinary
@@ -162,7 +168,13 @@ write lands through (`_refuse_unpublishable`, `_refuse_aws_project_profiles`), w
 "left as it found it" exemption compares against the prior document as the loader reads it
 (`_prior_document`: the endorsed copy where the seal applies), so a refused value the pending
 edit added answers `409 write_refused` with the floor's own message instead of publishing.
-Those routes are owner-gated and CSRF-guarded and never reachable by an agent or MCP tool; a
+Those routes are owner-gated and CSRF-guarded and never reachable by an agent or MCP tool;
+`kirocrew config pending` (`cli_config_pending.py`) lists the same diff, binds Apply and Discard to
+the signature it printed, refuses both inside a Kiro Crew sandbox (`sandbox_launch_mark`; the
+read-only bind on the endorsed copies refuses the write there anyway) and audits each to SEL; as
+it runs no live follow-up, an Apply of `denied_commands.json` or a computer-use on/off flip prints
+that a running gateway picks it up at restart, while a `config.json` Apply reaches the config
+watcher like a `kirocrew config set`, so only a restart-marked key waits for the restart. A
 heartbeat sync raises one bell note per pending version, on the unmutable `system.approval`
 channel, and acknowledges it once resolved; the scan and the note writes together are bounded
 so a stalled disk never holds the heartbeat. Every Kiro Crew writer of these four files goes
@@ -173,7 +185,7 @@ and restore and import (`endorse_installed`). Two writers do not endorse: `kiroc
 seed-floor rewrite of a pod's `config.json` (another data home), and `kirocrew config edit`, which
 runs `$EDITOR` on `config.json` itself. Where the seal applies and the file already has a copy,
 their result is an outside change like any other: pending until the owner applies it in
-Settings > Security. A reader outside the load decides that a protected file is absent only through
+Settings > Security or with `kirocrew config pending`. A reader outside the load decides that a protected file is absent only through
 `read_endorsed_config_text` / `read_config_for_update` (no `is_file()` / `exists()` check
 first), so a deleted file whose endorsed copy is in force reads as that copy everywhere. The
 pending diff and Apply compare values type-strictly (`strict_json_equal`: `true` is not `1`),
@@ -3255,6 +3267,8 @@ live in `dashboard/server_runtime/config_watch.py::_register_config_watch` — `
 `agent.model`, `agent.role_models.background`, `agent.log_level`
 (→ `handlers/updates_streams.py::apply_log_level_from_config`),
 `dashboard.dynamic_dashboard_cards` (→ `DashboardState.set_dynamic_cards_enabled`),
+`dashboard.command_bar_enabled` (→ a `config` refresh frame, since the shell reads it from
+the shared config query, which never goes stale on its own),
 `dashboard.terminal.enabled` (→ `handlers/terminal_lifecycle.py::apply_terminal_enabled`, run
 off the cycle like the provider switch below, since ending a shell can outlast the bound), and
 `agent.model_context_tokens` (→ `model_registry.apply_operator_windows`, process state of
@@ -3287,6 +3301,10 @@ own the shared agent home (`wrote=False`) takes the same failure path, notify an
 defer, rather than reading as applied; a successful rebuild also re-runs
 `SessionManager.refresh_defaults` so warm-pool providers minted from the old spec
 are reconciled (`dashboard/server_runtime/config_watch.py` `_apply_default_model`).
+The `agent.role_models.background` applier raises on a failed or unwritten rebuild,
+a shared-home refusal (`wrote=False`) included, so the watcher keeps it stale and
+retries it, the same contract as the `agent.model` applier above, without a
+dashboard notification (`_apply_background_model`).
 The `wrote=False` refusal is one case of a general ownership guard: every write through
 the shared-spec primitive (`agent_parts/spec_files.py` `_atomic_json_write`) is refused with
 `SharedAgentHomeRefused` when the data home does not own the shared agents directory. The
@@ -3681,6 +3699,7 @@ class DashboardConfig:
     translucent_panels: str = ""   # the Translucent panels (Liquid Glass) switch: "on" | "off"; empty = never chosen on this workspace (the browser's own stored choice holds). See "Dashboard theme persistence" below.
     language: str = ""             # dashboard UI language, BCP-47 (e.g. "en", "zh-CN"); empty = auto-detect from the browser. See "Dashboard UI language" below.
     show_unread_dot: bool = True   # the per-row unread dot on sidebar session cards (Settings → Display → Sidebar); only a literal false hides it. Folder and aggregate unread counts are unaffected. PATCH-able via /api/config/kirocrew
+    command_bar_enabled: bool = True  # what the quick-search shortcut opens (Settings → Display → View): the Command Bar launcher, or with a literal false the search palette. Replaced the former `command-bar` app's enabled state; the boot cleanup carries a record's opt-out here (apps/builtin_fold.py). PATCH-able via /api/config/kirocrew
     folder_sort: str = "custom"    # sidebar folder order: "custom" (stored positions) | "name" (natural, 01. < 02. < 10.) | "created" (newest first). A view preference; never rewrites a folder's stored order. See "Sidebar folder order" below.
     session_sort: str = "date-desc" # sidebar session order: "date-desc" / "date-asc" (last activity), "created-desc" / "created-asc" (creation time), "name-asc" / "name-desc" (title), "manual" (the person's own drag order). A view preference; pinned rows keep their own order. See "Sidebar session order" below.
     onboarded: bool = False         # whether the "Choose your look" onboarding modal was completed

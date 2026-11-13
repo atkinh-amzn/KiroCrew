@@ -307,19 +307,26 @@ by evidence: on each POSIX save `config.write_provenance.staging_hook` reads the
 `(dev, ino)` off the writer's own descriptor BEFORE the rename publishes it (a stat of the name
 afterwards could meet a file someone else put there) and records it, with the identity of the file it replaces, under the leaf's name in
 `<data_home>/config-provenance/published`, headed by a nonce fresh to the gateway process. The
-gateway lists only the latest identity per name, so an older file it once wrote, put back at the
-name, refuses as a rollback. A record that cannot be rewritten is removed before the save goes
+gateway admits only the latest identity per name, so an older file it once wrote, put back at the
+name, refuses as a rollback. It admits that identity for a pass that saw any file of the unbroken
+run of its own saves that led to it (bounded, `write_provenance._MAX_RUN`): on a fresh host the boot
+writers save several times within one spawn's window, and with only the last save listed, two saves
+between a pass and its pin would refuse that spawn (a first boot's default-install registry clone
+is one). Every file between the pass's and the latest left the name through the gateway's own
+rename, so nothing the pass inspected is left at another name. A save that replaced a file the
+gateway did not publish starts a new run, so a rewrite by anything else in between still refuses. A record that cannot be rewritten is removed before the save goes
 ahead, and a save whose record can be neither rewritten nor removed is refused, so the record
 never vouches for a file older than the one at the name. It holds descriptors on both the replaced and
-the published file, so the
-inode cannot be freed and its number reused by another file while it is vouched for. The plan carries the record's path, that nonce and the two
+the published file of every save in the run, so no
+inode can be freed and its number reused by another file while it is vouched for. The plan carries the record's path, that nonce and the two
 names (`published_file_record`). On a changed occupant at one of those names, and only after
 the kind check, the launcher (`_published_by_gateway`) accepts when the entry at the name is the
 same kind of entry the pass saw (the same link, for a symlinked config, which the writer writes
 through), the object it pinned is a regular file, and the record -- opened no-follow, first line
-equal to the plan's nonce -- lists that object as published under the name by a save that
-replaced the very file this spawn's pass saw there (each entry is `<replaced> -> <published>`,
-so a save by another process in between, or an older gateway file put back, is not vouched for). One read answers,
+equal to the plan's nonce -- lists that object as published under the name for the very file this spawn's pass saw there
+(each entry is `<replaced> -> <published>`, one per file of the run, each naming the run's latest
+file, so a save by another process in between, or an older gateway file put back, is not vouched
+for). One read answers,
 because the record is written before the file it vouches for is published. Everything else refuses
 as before: a rewrite the gateway did not make, a swap after one of its writes (the swapped-in
 object is not listed), a record from another gateway process, and any other sealed name. The
@@ -385,11 +392,15 @@ endorsing puts the prior copy back, and a copy that exists but cannot be read ra
 of reading as "none" (which would serve the disk bytes). A symlinked `config.json` /
 `config.local.json` is endorsed under its LOGICAL name: the protected leaf is matched by
 resolved identity against the data-home name (`loosening_provenance.leaf_for`), so resolving
-the link for locking and writing does not lose it. Nothing endorses a file at rest: a file
-with no copy yet is not pending and loads as written, as before this check. The gateway's own
-first save of it endorses first, so the usual detach leaves no gap. Known limit: a host-side
-rename by something else (an editor that saves by rename) also detaches the bind, and until
-the gateway's first save of that file an in-sandbox write after it loads as written. It applies ONLY where that per-file bind can
+the link for locking and writing does not lose it. The one endorsement of a file at rest: the gateway's
+start endorses each protected file that has no copy yet (`adopt_unendorsed`), once, before any
+session of the run, only a regular file holding a JSON object stored as Kiro Crew writes one; a
+leaf that already has a copy is never adopted again, so a later start leaves a differing file
+pending. Any other file with no copy is not pending and loads as written until the gateway's own
+first save of it (which endorses first, so the usual detach leaves no gap) or a later start
+adopts it. Known limit, for such a file only: a host-side rename by something else (an
+editor that saves by rename) also detaches the bind, and until the gateway's first save of that
+file an in-sandbox write after it loads as written. It applies ONLY where that per-file bind can
 actually lapse -- a Linux host that can build the namespace sandbox
 (`loosening_provenance.enforcement_active`, host facts only, so it never reads the file it
 protects). Inside a sandbox it is always on without a probe, which the sandbox's seccomp
@@ -407,7 +418,9 @@ the channel users cannot mute (`notifications.settings.PROTECTED_CHANNELS`), at 
 priority: the edit is not in effect until the owner decides, so no mute may hide that it is
 waiting. The Settings nav dot reads only the pending count (the GET below and the
 `config_pending_changed` WebSocket event), never the bell or its preferences. Only the
-dashboard OWNER resolves it: `POST /api/security/config-pending/{leaf}/apply` endorses the
+OWNER resolves it, in the dashboard or, without one, from their own terminal with `kirocrew config
+pending` (the same writer and signature check; refused inside a Kiro Crew sandbox, not an MCP
+tool): `POST /api/security/config-pending/{leaf}/apply` endorses the
 on-disk version and `.../discard` restores the endorsed copy, each through the leaf's own
 endorsing writer, each behind `require_owner_dashboard_request` and the dashboard CSRF
 barrier, and each naming the reviewed version's signature (409 when the file changed since).
@@ -1304,6 +1317,30 @@ Security properties:
   existed (405, `Allow: DELETE`). A remote server's `headers`
   and the process environment are not scanned: the first is never resolved, and
   the second is not a reference Kiro Crew wrote.
+- **Browser sign-in reads a login inside the gateway only.** Under the
+  `secrets_vault` feature preview, a browser `credentials` quick ask may be
+  answered from a vault login (`browser_harness/vault_fill.py`; see
+  [browser](browser.md), "Sign-in from the Secrets vault"). This is no read-back
+  path: the owner's card receives each matching login's entry name and username,
+  never a password; the person's click on the owner-only
+  `POST /api/browser/ask/answer` (internal secret refused) names one, and the
+  gateway reads its username and password and writes them straight into the
+  bound, re-verified page field. The agent's `ask` op and its outcome words do
+  not change. The offered usernames reach only the owner-only live event, for
+  the person to pick by; no password reaches it, and no password or username
+  reaches the agent, a log, the SEL, the replay, the poll or the tool result. A login is offered by base domain (eTLD+1 from the
+  bundled Public Suffix List), exact host and port where there is none, and never
+  from https onto an http page. The same quick ask stores what the person TYPED
+  only when they ticked "Save to Secrets store" (off by default, offered whenever they
+  type, beside a match too), only after the fill landed, and only as a new item
+  (`SecretVault.add_item_under_free_name` picks a free name under the store
+  lock, so nothing is overwritten, and skips every name `POST /api/secrets` would
+  refuse the same caller, through `secrets.reserved_name_check`: a Connections
+  client secret, the WakaTime OAuth tokens, and for a remote caller a channel
+  credential, so a remote session cannot plant one from the browser card; the
+  route and that check share `_managed_name_owned` and `_remote_channel_reserved`,
+  so each rule is written once). One SEL row per vault fill and per save
+  names the item and the origin.
 - **Sandbox-hidden.** The `.vault` directory sits under the crew data home,
   which the OS-level sandbox bind-mounts away from the agent subprocess tree,
   so the agent cannot read the ciphertext off disk either. On Linux a mount
@@ -2882,7 +2919,12 @@ no file, and a sandboxed process cannot create the file first with `disable_all`
 - **Write (dashboard):** the `/api/security/denied-commands` mutations run
   `_write_denied_state` — an atomic read-modify-write of `denied_commands.json`
   under the shared config lock, routed through
-  `atomic_write(restrict_to_owner=True)`. The lockdown lands on the temp file
+  `atomic_write(restrict_to_owner=True)`. A save other than the owner's Apply or
+  Discard refuses a pending file before it reads it, as the `computer_use.json`
+  PUT does, so it cannot publish a stale copy over a `kirocrew config pending`
+  Apply from another process; what remains is the window
+  `refuse_save_if_pending` documents, an outside edit and its Apply both landing
+  inside one save. The lockdown lands on the temp file
   before any content reaches it, so the keystone never exists in a
   world-readable file: 0o600 on POSIX, owner-only DACL on Windows. On a
   lockdown failure `atomic_write` raises by default (the same fail-loud

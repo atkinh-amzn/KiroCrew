@@ -1788,11 +1788,14 @@ notes (`/api/notifications/own` and the dashboard's `useAppNotifications()`, see
 [`ctx.app_token()` and `ctx.gateway_origin()`](#app-token-ctxapp_token), level 6
 adds the dashboard's [issue list](#issue-list) (`useIssues`, `IssueList`, `IssueCard`),
 level 7 adds the manifest's `agentReadOnlyDirs` (see
-[manifest-reference.md](manifest-reference.md#agent-read-only-directories)) and the
-[backend SDK](#backend-sdk-kiro_crewappsbackend_sdk), and level 8 adds
+[manifest-reference.md](manifest-reference.md#agent-read-only-directories)), the
+[backend SDK](#backend-sdk-kiro_crewappsbackend_sdk) and the `desktop` block's
+`displays: "all"`, `background` kind and `gutter` (see
+[manifest-reference.md](manifest-reference.md#desktop-windows)), and level 8 adds
 `permissions.bots`, which an app's backend uses with its app token
 ([Bots](#bots-permissionsbots-from-your-backend)); each level
-includes every level below it. Read it
+includes every level below it. Several seams share level 7, so an app that needs one
+feature-detects it, never the level alone. Read it
 with `getattr(ctx, "sdk_level", 0)`. When it is lower than your app needs, call
 `ctx.health.mark_degraded(...)` with the consequence and keep serving what you can.
 The dashboard exports the same number as `APP_SDK_LEVEL`.

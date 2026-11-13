@@ -67,8 +67,32 @@ Tool permission prompt (same keys as kiro-cli chat):
         parents=[_jail_opts],
     )
     chat_parser.add_argument("-m", "--message", help="Single message (non-interactive)")
-    chat_parser.add_argument("--model", help="Model to use (default: from config)")
+    chat_parser.add_argument(
+        "--model", help="Model to use (default: from config; `kirocrew models` lists the names)"
+    )
     chat_parser.add_argument("--agent", help="Agent to use (default: from config)")
+
+
+def register_models_parser(sub: _Commands) -> None:
+    models_parser = cli_help.add_command(
+        sub,
+        "models",
+        epilog="""
+Examples:
+  kirocrew models                  # Names --model accepts; * marks the default
+  kirocrew models --json           # The same list for scripts
+  kirocrew models claude-sonnet    # Is this name valid? Exit 1 with the closest if not
+""",
+        formatter_class=_fmt,
+    )
+    models_parser.add_argument("name", nargs="?", default=None, help="A model name to check")
+    models_parser.add_argument("--json", action="store_true", help="Print JSON instead of text")
+    models_parser.add_argument(
+        "--port",
+        type=int,
+        default=None,
+        help="Dashboard port (default: found as `kirocrew status` finds it)",
+    )
 
 
 def register_cron_parser(sub: _Commands) -> None:
@@ -210,7 +234,7 @@ Examples:
         "--model",
         dest="model",
         default="",
-        help="Model id for the agent wake (as advertised by kiro-cli --list-models)",
+        help="Model id for the agent wake (`kirocrew models` lists the names)",
     )
     cron_add.add_argument(
         "--persistent-session",
@@ -861,6 +885,39 @@ def register_memory_parser(sub: _Commands) -> None:
         "--store", default=None, help="Store to read (default: the default store)"
     )
     dream_list.add_argument("--json", action="store_true", help="Print JSON")
+    mem_shadow = mem_sub.add_parser(
+        "shadow",
+        help="Report what each shadow memory stage would change (read-only)",
+        description="Reads the injection receipts and the store's memory_meta logs "
+        "that shadow stages already write, and prints counts per stage. Writes nothing.",
+    )
+    shadow_sub = mem_shadow.add_subparsers(dest="shadow_action", required=True)
+    shadow_report = shadow_sub.add_parser(
+        "report", help="Per stage: flag, window, days, sessions, would-change rate"
+    )
+    # Literal like carve's choices: this parser is built on the gateway boot path.
+    shadow_report.add_argument(
+        "--stage",
+        default=None,
+        choices=[
+            "rule_authority_order",
+            "relevance_rule",
+            "lesson_fold",
+            "kind_routing",
+            "lesson_origin_gate",
+            "lesson_tier_policy",
+            "member_lesson_dedup",
+            "dream",
+        ],
+        help="Only this stage, with its counts by day",
+    )
+    shadow_report.add_argument(
+        "--since", default=None, help="Start no earlier than YYYY-MM-DD or <n>d ago"
+    )
+    shadow_report.add_argument(
+        "--store", default=None, help="Store to read (default: the default store)"
+    )
+    shadow_report.add_argument("--json", action="store_true", help="Print JSON")
 
 
 def register_agent_parser(sub: _Commands) -> None:
