@@ -57,6 +57,11 @@ import functools
 import re
 from pathlib import Path
 
+import pytest
+
+# The tree-wide tests share one cached scan, so they run on one worker per run.
+pytestmark = pytest.mark.xdist_group(name="tree_scan_lenient_read_rewrite_ratchet")
+
 _SRC = Path(__file__).resolve().parent.parent / "src"
 
 #: Caught by a handler, these mean "a read error other than a missing file".
@@ -211,6 +216,15 @@ class _Module:
                 fn.qual.rpartition(".")[2] for fn in self.functions if is_lenient_reader(fn)
             }
 
+    def release(self) -> None:
+        """Drop the tree once its facts are taken; :meth:`parse` rebuilds it on demand.
+
+        Holding every parsed module at once is what made this scan the suite's
+        largest memory step, so only ``readers`` outlives a pass.
+        """
+        self.tree = None
+        self.functions = []
+
 
 def _imports(module: _Module, modules: dict[str, _Module]) -> tuple[dict[str, str], set[str]]:
     """``(alias -> imported project module, names bound to an imported lenient reader)``."""
@@ -307,6 +321,7 @@ def rewrites_from_lenient_reads(modules: dict[str, _Module]) -> dict[str, list[i
         text = module.text
         if text is not None and _HANDLER_GATE.search(text) and _EMPTY_GATE.search(text):
             module.parse()
+            module.release()
     names = sorted({name for module in modules.values() for name in module.readers})
     if not names:
         return {}
@@ -318,6 +333,7 @@ def rewrites_from_lenient_reads(modules: dict[str, _Module]) -> dict[str, list[i
             continue
         module.parse()
         found.update(_scan_module(module, modules))
+        module.release()
     return {key: sorted(lines) for key, lines in found.items()}
 
 
@@ -338,7 +354,11 @@ def load_modules(root: Path, sources: dict[str, str] | None = None) -> dict[str,
 def _src_scan() -> tuple[dict[str, _Module], dict[str, list[int]]]:
     """``src/`` is read once per worker for every tree-wide test."""
     modules = load_modules(_SRC)
-    return modules, rewrites_from_lenient_reads(modules)
+    found = rewrites_from_lenient_reads(modules)
+    # The cache outlives this module's tests on the worker; keep the readers, not the text.
+    for module in modules.values():
+        module.text = None
+    return modules, found
 
 
 def test_no_new_rewrite_starts_from_a_lenient_read() -> None:
