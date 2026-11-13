@@ -16,8 +16,9 @@ latched value can be arbitrarily stale. That splits the callers in two:
   authority: one has no turn at all, the other has already rewritten durable
   history by the time the turn fails. See
   ``docs/system-specs/modules/acp-client.md`` § "Poll-driven spawn sites are
-  readiness-gated". The reruns block only while their turn runs on a harness
-  that signs in via kiro-cli (:func:`rerun_signs_in_via_kiro_cli`).
+  readiness-gated". The reruns and ``POST /v1/chat/completions`` block only
+  while their turn runs on a harness that signs in via kiro-cli
+  (:func:`rerun_signs_in_via_kiro_cli`).
 """
 
 from __future__ import annotations
@@ -297,7 +298,8 @@ async def reject_if_kiro_unverified(
       collectors take only ``chunk``/``assistant`` roles, so an ``AcpAuthRequired``
       turn's ``error`` card is invisible and the request would answer 200 with
       empty content, which an SDK client cannot tell apart from a model that said
-      nothing.
+      nothing. Like the reruns, it asks only when its turn runs on a harness that
+      signs in via kiro-cli.
 
     Ordinary sends are deliberately NOT gated: they mutate nothing up front, so a
     stale latch must not block them (see the module docstring). That includes
@@ -344,7 +346,7 @@ async def kiro_latched_ready(request: web.Request) -> bool:
 async def rerun_signs_in_via_kiro_cli(
     sessions: SessionManager | None, slot: _ChatSlot | None
 ) -> bool:
-    """Whether a rerun on *slot* starts its turn on a harness that signs in via kiro-cli.
+    """Whether a rerun or completion on *slot* starts its turn on a harness that signs in via kiro-cli.
 
     The latch :func:`reject_if_kiro_unverified` reads is a kiro-cli verdict, so it
     describes only the harnesses in ``backends_retired_by_host_logout()``. On any
