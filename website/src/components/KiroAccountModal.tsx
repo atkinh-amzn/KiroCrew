@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useSyncExternalStore } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { AlertCircle, AlertTriangle, ArrowRight, Coins, ExternalLink, Eye, EyeOff, Gift, Info, Loader2, RefreshCw, UserRound } from 'lucide-react'
@@ -116,6 +116,36 @@ interface KiroAccountModalProps {
 
 const KIRO_ACCOUNT_URL = 'https://app.kiro.dev/settings/account'
 const KIRO_ACCOUNT_EMAIL_HIDDEN_KEY = 'kirocrew:account-email-hidden'
+
+// The e-mail hide toggle as one store, so every place that shows the e-mail (this
+// popup, the Kiro sign-in card) follows a press at once. `emailHiddenChoice` holds
+// a press only while storage refuses the write; another tab's write clears it.
+const emailHiddenListeners = new Set<() => void>()
+let emailHiddenChoice: boolean | null = null
+const readEmailHidden = () => emailHiddenChoice ?? safeGetItem(KIRO_ACCOUNT_EMAIL_HIDDEN_KEY) !== '0'
+function subscribeEmailHidden(listener: () => void) {
+  const onStorage = (event: StorageEvent) => {
+    if (event.key !== KIRO_ACCOUNT_EMAIL_HIDDEN_KEY) return
+    emailHiddenChoice = null
+    listener()
+  }
+  emailHiddenListeners.add(listener)
+  window.addEventListener('storage', onStorage)
+  return () => {
+    emailHiddenListeners.delete(listener)
+    window.removeEventListener('storage', onStorage)
+  }
+}
+
+/** Whether the account e-mail is hidden (the default), and the setter the popup's toggle uses. */
+export function useAccountEmailHidden(): [boolean, (hidden: boolean) => void] {
+  const hidden = useSyncExternalStore(subscribeEmailHidden, readEmailHidden, () => true)
+  const setHidden = (next: boolean) => {
+    emailHiddenChoice = safeSetItem(KIRO_ACCOUNT_EMAIL_HIDDEN_KEY, next ? '1' : '0') ? null : next
+    emailHiddenListeners.forEach(listener => listener())
+  }
+  return [hidden, setHidden]
+}
 
 function formatResetDate(value: string): string {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
@@ -288,17 +318,8 @@ function BonusCredits({ grants }: { grants: KiroBonusCreditGrant[] }) {
 }
 
 function AccountIdentity({ usage }: { usage: KiroAccountUsage }) {
-  const [emailHidden, setEmailHidden] = useState(
-    () => safeGetItem(KIRO_ACCOUNT_EMAIL_HIDDEN_KEY) !== '0',
-  )
-
-  const toggleEmailVisibility = () => {
-    setEmailHidden(hidden => {
-      const next = !hidden
-      safeSetItem(KIRO_ACCOUNT_EMAIL_HIDDEN_KEY, next ? '1' : '0')
-      return next
-    })
-  }
+  const [emailHidden, setEmailHidden] = useAccountEmailHidden()
+  const toggleEmailVisibility = () => setEmailHidden(!emailHidden)
 
   // A reading names the user and its provider; the account-only state names
   // only the provider (its account type).

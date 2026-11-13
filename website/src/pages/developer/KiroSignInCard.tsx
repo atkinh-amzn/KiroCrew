@@ -2,9 +2,13 @@ import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, CheckCircle2, KeyRound, Loader2, LogOut, RefreshCw } from 'lucide-react'
 import { api, type KasLoginStatus } from '../../api/client'
+import { isAccountOnly, parseKiroUsagePayload } from '../../api/kiroUsage'
 import { KasLoginEmbedded } from '../../components/KasLoginGate'
 import { providerLabelFromWire } from '../../components/kasProviderLabel'
+import { useAccountEmailHidden } from '../../components/KiroAccountModal'
+import { configuredAcpBackend, type AcpBackendConfig } from '../../api/acpBackend'
 import { clearCachedModels } from '../../providers/adapters/acp'
+import { KIRO_SIGN_IN_BACKEND } from './kiroSignInLink'
 import ErrorNotice from '../../components/ErrorNotice'
 import { Btn, Card, CardTitle } from '../../components/ui'
 import { KIRO_SIGN_IN_HIGHLIGHT_ANCHOR } from '../../hooks/useSettingHighlight'
@@ -15,6 +19,51 @@ import { signInLapsed } from './kiroSignInState'
 // Same cache key the embedded flow reads status under (KasLoginGate.QUERY_KEY):
 // a sign-out here must invalidate the flow's query, not a private copy of it.
 const STATUS_QUERY_KEY = ['kas-login'] as const
+
+/**
+ * Who the stored sign-in belongs to (email, else account name), read from the
+ * top bar's `['kiro-usage']` reading -- the vault stores no e-mail, so that
+ * whoami-backed reading is the only place a name exists. That reading names the
+ * vault account only while the saved main harness is KAS (the gateway's
+ * `_vault_owns_usage_sync`); on any other harness it names kiro-cli's login,
+ * which this card's Sign out does not touch, so no name is shown then, nor
+ * before the config has loaded. `enabled: false`: the top bar owns both reads,
+ * this only observes them. `hidden`: an e-mail follows the account popup's hide
+ * toggle (hidden by default), so a shared screen does not show it here either.
+ */
+function useSignedInAccount(): { name: string; hidden: boolean } {
+  const { data } = useQuery({
+    queryKey: ['kiro-usage'],
+    queryFn: () => api.sessionsUsage().then(parseKiroUsagePayload),
+    enabled: false,
+  })
+  const { data: cfg } = useQuery<AcpBackendConfig>({
+    queryKey: ['kirocrewConfig'],
+    queryFn: () => api.kirocrewConfig(),
+    enabled: false,
+  })
+  const [emailHidden] = useAccountEmailHidden()
+  if (cfg === undefined || configuredAcpBackend(cfg) !== KIRO_SIGN_IN_BACKEND) return { name: '', hidden: false }
+  if (typeof data !== 'object' || data === null || isAccountOnly(data)) return { name: '', hidden: false }
+  if (data.email) return { name: data.email, hidden: emailHidden }
+  return { name: data.account || '', hidden: false }
+}
+
+/** The account after the provider, as ` · <name>`; a hidden e-mail is blurred like the popup's. */
+function AccountName({ name, hidden, testId }: { name: string; hidden: boolean; testId?: string }) {
+  if (!name) return null
+  return (
+    <span data-testid={testId} className="ml-1.5 font-normal text-muted">
+      {'· '}
+      <span
+        data-account-hidden={hidden ? 'true' : undefined}
+        className={hidden ? 'select-none blur-[5px] opacity-60' : undefined}
+      >
+        {name}
+      </span>
+    </span>
+  )
+}
 
 function SignedInSummary({
   status,
@@ -42,6 +91,7 @@ function SignedInSummary({
   })
   const lapsed = signInLapsed(status)
   const provider = providerLabelFromWire(status.provider)
+  const account = useSignedInAccount()
   // What renews the session, in words the user can act on: an access token the
   // engine refreshes itself, one that has already lapsed, or one the issuer
   // refused to renew. Never the token, never its length.
@@ -73,6 +123,7 @@ function SignedInSummary({
             {lapsed
               ? i18nT('pages.developer.kiroSignInCard.sign_in_expired')
               : i18nT('pages.developer.kiroSignInCard.signed_in_with', { provider })}
+            {!lapsed ? <AccountName {...account} testId="kiro-sign-in-account" /> : null}
           </p>
           <p className="mt-0.5 text-[13px] leading-relaxed text-muted">
             {lapsed
@@ -188,6 +239,7 @@ export function KiroSignInCard({
     enabled: false,
   })
   const authenticated = observed?.authenticated === true
+  const account = useSignedInAccount()
   useEffect(() => {
     if (authenticated) setSignedOutNote(false)
   }, [authenticated])
@@ -283,6 +335,7 @@ export function KiroSignInCard({
               {i18nT('pages.developer.kiroSignInCard.signed_in_with', {
                 provider: providerLabelFromWire(observed.provider),
               })}
+              <AccountName {...account} />
             </span>
           )}
         </summary>

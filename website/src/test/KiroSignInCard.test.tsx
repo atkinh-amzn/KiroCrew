@@ -4,6 +4,7 @@ import { KiroSignInCard } from '../pages/developer/KiroSignInCard'
 import { KIRO_SIGN_IN_PATH } from '../pages/developer/kiroSignInLink'
 import { KIRO_SIGN_IN_HIGHLIGHT_ANCHOR } from '../hooks/useSettingHighlight'
 import { SETTINGS_MANUAL } from '../components/commandPalette/settingsManual'
+import { useAccountEmailHidden } from '../components/KiroAccountModal'
 import { api, type KasLoginStatus } from '../api/client'
 
 vi.mock('../api/client', async importOriginal => {
@@ -28,6 +29,10 @@ vi.mock('../api/client', async importOriginal => {
 })
 
 const kasLoginStatus = vi.mocked(api.kasLoginStatus)
+// #36156: the saved config with KAS as the main harness, and a usage reading naming an account.
+const ON_KAS = { agent: { acp_backend: 'kas' } }
+const ADA = { used: 1, limit: 10, bonusCredits: [], email: 'ada@example.com' }
+const fold36156 = () => screen.getByTestId('kiro-sign-in-fold-state')
 const kasLoginLogout = vi.mocked(api.kasLoginLogout)
 const kasLoginBeginDevice = vi.mocked(api.kasLoginBeginDevice)
 
@@ -98,6 +103,61 @@ describe('KiroSignInCard', () => {
     expect(screen.queryByTestId('kiro-sign-in-fold-state')).toBeNull()
     // The heading-navigation stop the section form had.
     expect(screen.getByRole('heading', { name: 'Kiro sign-in' })).toBeInTheDocument()
+  })
+
+  it('names the signed-in account next to the provider, in the card and in the folded heading (#36156)', async () => {
+    kasLoginStatus.mockResolvedValue(SIGNED_IN)
+    const { queryClient } = renderWithProviders(<KiroSignInCard compact />)
+    // The top bar's whoami-backed reading is the only place a name exists; on KAS it names the vault account.
+    act(() => {
+      queryClient.setQueryData(['kirocrewConfig'], ON_KAS)
+      queryClient.setQueryData(['kiro-usage'], ADA)
+    })
+    await waitFor(() => expect(screen.getByTestId('kiro-sign-in-fold-state')).toHaveTextContent(/Signed in with Google\s*· ada@example\.com/))
+    const card = screen.getByTestId('kiro-sign-in-card') as HTMLDetailsElement
+    await act(async () => {
+      card.open = true
+      fireEvent(card, new Event('toggle'))
+    })
+    await waitFor(() => expect(screen.getByTestId('kiro-sign-in-account')).toHaveTextContent('ada@example.com'))
+    // Hidden by default, like the account popup: blurred, never left out.
+    expect(screen.getByTestId('kiro-sign-in-account').querySelector('[data-account-hidden="true"]')).toHaveTextContent('ada@example.com')
+  })
+
+  it('follows the account popup hide toggle on a card that is already showing (#36156)', async () => {
+    // The popup's own toggle, mounted beside the card as the dashboard has them.
+    function PopupToggle() {
+      const [hidden, setHidden] = useAccountEmailHidden()
+      return <button onClick={() => setHidden(!hidden)}>{hidden ? 'Show email' : 'Hide email'}</button>
+    }
+    try {
+      kasLoginStatus.mockResolvedValue(SIGNED_IN)
+      const { queryClient } = renderWithProviders(<><KiroSignInCard compact /><PopupToggle /></>)
+      act(() => {
+        queryClient.setQueryData(['kirocrewConfig'], ON_KAS)
+        queryClient.setQueryData(['kiro-usage'], ADA)
+      })
+      const fold = () => screen.getByTestId('kiro-sign-in-fold-state')
+      await waitFor(() => expect(fold()).toHaveTextContent('ada@example.com'))
+      expect(fold().querySelector('[data-account-hidden]')).not.toBeNull()
+      fireEvent.click(screen.getByRole('button', { name: 'Show email' }))
+      expect(fold().querySelector('[data-account-hidden]')).toBeNull()
+      fireEvent.click(screen.getByRole('button', { name: 'Hide email' }))
+      expect(fold().querySelector('[data-account-hidden]')).not.toBeNull()
+    } finally {
+      localStorage.removeItem('kirocrew:account-email-hidden')
+    }
+  })
+
+  it('names no account when the main harness is kiro-cli, whose login the usage reading then names (#36156)', async () => {
+    kasLoginStatus.mockResolvedValue(SIGNED_IN)
+    const { queryClient } = renderWithProviders(<KiroSignInCard compact />)
+    act(() => {
+      queryClient.setQueryData(['kirocrewConfig'], { agent: { acp_backend: 'kiro' } })
+      queryClient.setQueryData(['kiro-usage'], ADA)
+    })
+    await waitFor(() => expect(fold36156()).toHaveTextContent('Signed in with Google'))
+    expect(fold36156()).not.toHaveTextContent('ada@example.com')
   })
 
   it('compact: re-opens when a stored sign-in lapses after the page loaded', async () => {
