@@ -801,7 +801,11 @@ def _url_payload_command(n: int) -> str:
 #: rebuild's budget for every caller and is reused for a second on the event loop, so
 #: no gate scans ``apps/`` on its own thread. A miss refuses, and refuses later callers
 #: at once while that listing is still in flight. Re-measured.
-_PACKAGE_LINE_BUDGET = 35_901
+#: Raised by 25, from 35,901, to 35,926, for ``rm_floor._pipe_recipients`` and
+#: ``_reads_pipe``: a heredoc piped into a shell is read as its script whatever the
+#: shell's arguments hold, the recipient found by bisecting sorted offsets. No
+#: check was relaxed. Re-measured.
+_PACKAGE_LINE_BUDGET = 35_926
 
 #: Ceiling on any ONE file in the package. This is what the bound is really for --
 #: a package total says nothing about a single file growing back into a second
