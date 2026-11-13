@@ -807,7 +807,9 @@ def _url_payload_command(n: int) -> str:
 #: row only, and ``is_denied`` judges that row on the view while its events keep the
 #: command as submitted. Every other row, an operator's copy, and the rm floor for
 #: ``/`` and ``~`` read the full text. Re-measured.
-_PACKAGE_LINE_BUDGET = 35_997
+#: Raised by 40, from 35,997, reserved for the deny view's Windows program-suffix and
+#: in-word ``^``/backtick views and the ``aws.exe`` s3 download spelling (#33569).
+_PACKAGE_LINE_BUDGET = 36_037
 
 #: Ceiling on any ONE file in the package. This is what the bound is really for --
 #: a package total says nothing about a single file growing back into a second
