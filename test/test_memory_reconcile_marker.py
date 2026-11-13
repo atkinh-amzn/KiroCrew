@@ -7,6 +7,11 @@ from kiro_crew._sqlite_compat import sqlite3
 from kiro_crew.vector_memory import VectorMemoryStore
 
 
+@pytest.fixture(autouse=True)
+def _clear_notes_every_start(_floor_monkeypatch):
+    _floor_monkeypatch.setattr(meta, "_DIRTY_KEEP", 0)
+
+
 @pytest.fixture
 def path(tmp_path):
     return tmp_path / "memory.db"
@@ -68,21 +73,24 @@ def test_unchanged_rows_are_not_hashed_on_the_second_boot(path, monkeypatch):
 
 def test_first_boot_with_no_marker_runs_the_full_pass(path, monkeypatch):
     _seed(path)
+    _raw(path, "DELETE FROM memory_reconcile_state")
     assert _boot_hashes(path, monkeypatch) == 20
 
 
-def test_empty_store_installs_no_marker(path):
+def test_a_fresh_store_is_born_marked(path):
     _open(path).close()
     db = sqlite3.connect(path)
-    found = db.execute(
-        "SELECT count(*) FROM sqlite_schema WHERE name LIKE 'memory_reconcile%'"
+    marked = db.execute("SELECT count(*) FROM memory_reconcile_state").fetchone()[0]
+    triggers = db.execute(
+        "SELECT count(*) FROM sqlite_schema WHERE type='trigger' AND name LIKE 'memory_reconcile%'"
     ).fetchone()[0]
     db.close()
-    assert found == 0
+    assert (marked, triggers) == (2, 4)
 
 
 def test_a_writer_holding_the_lock_does_not_fail_the_open(path, monkeypatch):
     _seed(path)
+    _raw(path, "DELETE FROM memory_reconcile_state")  # an upgraded store: rows, no marker
     holder = sqlite3.connect(path, isolation_level=None)
     holder.execute("BEGIN IMMEDIATE")
     try:
@@ -218,3 +226,63 @@ def test_crew_lineage_views_are_covered_through_memory_items(monkeypatch):
     with db:
         assert meta.reconcile(db) == 2
     assert len(calls) == 4  # two checks plus two journaling writes; the access touch is skipped
+
+
+def _dirty(path):
+    db = sqlite3.connect(path)
+    try:
+        return db.execute("SELECT count(*) FROM memory_reconcile_dirty").fetchone()[0]
+    finally:
+        db.close()
+
+
+def test_a_busy_writer_is_not_waited_for_and_the_notes_wait(path, monkeypatch):
+    _seed(path)
+    _open(path).close()  # marker installed, nothing noted
+    store = _open(path)
+    store.set_semantic("user.k1", "changed", 1, "user_explicit")
+    store.close()
+    assert _dirty(path) == 1
+
+    seen = []
+    real = meta._take_write_lock
+
+    def spy(db):
+        statements = []
+        db.set_trace_callback(statements.append)
+        try:
+            got = real(db)
+        finally:
+            db.set_trace_callback(None)
+        seen.append((got, statements))
+        return got
+
+    monkeypatch.setattr(meta, "_take_write_lock", spy)
+    holder = sqlite3.connect(path, isolation_level=None)
+    holder.execute("BEGIN IMMEDIATE")
+    blocked = VectorMemoryStore(db_path=path, embedding_dim=2)
+    try:
+        blocked.init()
+    finally:
+        holder.execute("ROLLBACK")
+        holder.close()
+        blocked.close()
+    ((got, statements),) = seen
+    assert got is False
+    # The wait was switched off before the lock was asked for.
+    assert statements.index("PRAGMA busy_timeout=0") < statements.index("BEGIN IMMEDIATE")
+    assert _dirty(path) == 1  # left for the next start
+    monkeypatch.undo()
+    _open(path).close()
+    assert _dirty(path) == 0
+
+
+def test_a_few_noted_rows_are_rechecked_without_a_write(path, monkeypatch):
+    _seed(path)
+    _open(path).close()
+    monkeypatch.setattr(meta, "_DIRTY_KEEP", 500)
+    store = _open(path)
+    store.set_semantic("user.k1", "changed", 1, "user_explicit")
+    store.close()
+    assert _boot_hashes(path, monkeypatch) == 1
+    assert _dirty(path) == 1
