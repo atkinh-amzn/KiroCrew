@@ -230,8 +230,10 @@ caller waits for the first), reports `status()` (`installed`, `version`,
 `{version, platform, build, present, executable}`),
 and stops all of it in `stop()`. `waiting_allow` has no deadline because the
 connection is what keeps Chrome's Allow sheet on screen. The gateway stops the
-supervisor on shutdown and before an in-place restart's exec
-(`server_runtime/browser_lifecycle.py`, registered with `pre_exec_stops`), and
+supervisor on shutdown, before an in-place restart's exec, and before the hard
+exit of a graceful shutdown that ran out of time (`server_runtime/browser_lifecycle.py`,
+registered with `pre_exec_stops`; the cleanup hook unregisters it once its own
+stop has returned), and
 reclaims a stray daemon from a previous life at startup, then runs the startup
 auto-install (see the driver section).
 
