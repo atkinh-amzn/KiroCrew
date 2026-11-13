@@ -3587,6 +3587,7 @@ class MemoryConfig:
     inject_lessons_per_turn: bool = False  # on follow-up messages, add up to 3 matching lessons the session was not shown; requires inject_lessons
     inject_activity: bool = True     # inject the budgeted [Memory activity] block (projects, daily history (14 full days, then decayed summaries and counts to day 180), task facts, relevant episodes); requires inject_memory
     startup_recall_timeout_secs: float = 1.0  # how long a session-start build waits for a first-message embedding already running (the dashboard starts it early); past it, task facts, episodes and lessons rank by keyword. Any other build keeps context._PROMPT_BUILD_EMBED_TIMEOUT_SECS (5.0); 0 turns the early embedding off, and the early session-start memory reads with it; clamped to [0, 10]
+    embedding_idle_evict_secs: int = 3600  # unload the embedding model after this many seconds with no embed; 0 keeps it loaded. Host-sized default: 600 where platform_compat.host_total_mib() reads 16 GiB or less (embeddings_settings.small_memory_host), and there opening or typing in a dashboard chat loads it again first; a raw 3600 is read as that default (save() writes every field), so 3599 keeps about an hour on a small machine
 
 @dataclass
 class KnowledgeConfig:

@@ -269,6 +269,7 @@ class TestIdleEviction:
         assert not (_live_embed_threads() - threads_before)
 
     def test_zero_disables_eviction(self, tmp_path: Path, monkeypatch):
+        monkeypatch.setattr(embeddings_mod, "small_memory_host", lambda: False)
         monkeypatch.setattr(
             embeddings_mod, "_read_memory_config", lambda: {"embedding_idle_evict_secs": 0}
         )

@@ -2918,7 +2918,7 @@
       "sensitive": false,
       "tags": [],
       "label": "Unload Embedding Model When Idle (seconds)",
-      "help": "Seconds without any embedding before the embedding model is unloaded from memory. The next search or memory write loads it again, which takes a few seconds. 0 keeps the model loaded.",
+      "help": "Seconds without any embedding before the embedding model is unloaded from memory. The next search or memory write loads it again, which takes a few seconds. 0 keeps the model loaded. On a machine with 16 GiB of memory or less the default is 600, and opening or typing in a chat loads the model again before the first message; a saved 3600 is read as that default, so set 3599 to keep about an hour there.",
       "hasChildren": false,
       "enumValues": null,
       "defaultValue": 3600
