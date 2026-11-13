@@ -12,6 +12,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -159,7 +160,7 @@ _UNREADABLE_SPEC_WARNED: set[tuple[bytes, int]] = set()
 _UNREADABLE_SPEC_WARNED_MAX = 1024
 
 
-def _warn_unreadable_spec_once(path: Path, kind: str) -> None:
+def _warn_unreadable_spec_once(path: Path, kind: str, *, skipped: bool = False) -> None:
     """Name *path* in the gateway log, once per on-disk revision of it.
 
     The FULL path goes here, ``%r``'d: the gateway log is local to the
@@ -183,12 +184,31 @@ def _warn_unreadable_spec_once(path: Path, kind: str) -> None:
     # operational line carrying foreign text applies (``redact_log_via_context``,
     # the non-raising spelling for a log site), so a credential-shaped name is
     # scrubbed before it is written. ``%r`` still escapes control bytes.
+    outcome = (
+        "it is skipped, since it holds no policy"
+        if skipped
+        else "every session whose agent has no spec of its own is refused its managed "
+        "tools until it is moved or fixed"
+    )
     logger.warning(
-        "agent spec %r could not be read (%s); every session whose agent has no "
-        "spec of its own is refused its managed tools until it is moved or fixed",
+        "agent spec %r could not be read (%s); %s",
         redact_log_via_context(str(path)),
         kind,
+        outcome,
     )
+
+
+def _link_identity(path: Path) -> tuple[int, int] | None:
+    """``(st_dev, st_ino)`` of *path* itself, links not followed; ``None`` when it is absent.
+
+    The same file reached by two spellings (a case-insensitive filesystem, a hard
+    link) has one identity, which a comparison of names cannot see.
+    """
+    try:
+        st = os.lstat(path)
+    except OSError:
+        return None
+    return (st.st_dev, st.st_ino)
 
 
 def _refuse_if_any_spec_is_unreadable(agents_dir: Path, agent_name: str) -> None:
@@ -222,10 +242,24 @@ def _refuse_if_any_spec_is_unreadable(agents_dir: Path, agent_name: str) -> None
     operator told to "fix or remove the unreadable spec" had to validate every
     file in the directory by hand to find it.
     """
+    own = set(agent_spec_candidates(agents_dir, agent_name))
+    own_ids = {_link_identity(p) for p in own} - {None}
     for path in iter_agent_spec_files(agents_dir):
         try:
             read_agent_spec_strict(path, operation="session_tool_policy", source="dashboard")
         except (OSError, ValueError) as exc:
+            if (
+                isinstance(exc, FileNotFoundError)
+                and path.is_symlink()
+                and path not in own
+                and _link_identity(path) not in own_ids
+            ):
+                # A link whose read found no file holds no bytes, so it cannot declare
+                # a policy for anyone; it is logged once and the other agents are
+                # answered. Any other read failure, and the agent's own filename,
+                # stay a refusal: that policy is unknown.
+                _warn_unreadable_spec_once(path, "a link to a missing file", skipped=True)
+                continue
             if is_markdown_spec(path) and plain_markdown_document(path):
                 # Not a spec (no opening fence): it cannot declare a policy,
                 # so it must not turn into a denial of every other agent.
