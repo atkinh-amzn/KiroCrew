@@ -490,7 +490,18 @@ def merge_mcp_sources(config: dict) -> McpSources:
             if name in mcps and isinstance(mcps[name], dict):
                 # mcps[name] is a private copy (globals were copied in above),
                 # so update() does not mutate any source dict.
+                prior_env = mcps[name].get("env")
                 mcps[name].update(spec)
+                # An edition-supplied name keeps the env keys the edition ships:
+                # the store's own env keys win, but a same-named store entry
+                # must not drop the keys the server needs to run as shipped.
+                store_env = spec.get("env")
+                if (
+                    name in edition_names
+                    and isinstance(prior_env, dict)
+                    and isinstance(store_env, dict)
+                ):
+                    mcps[name]["env"] = {**prior_env, **store_env}
             else:
                 mcps[name] = dict(spec)
     return McpSources(kirocrew_mcp, shared_mcp, extra_shared_mcp, managed_names, _replaced)
