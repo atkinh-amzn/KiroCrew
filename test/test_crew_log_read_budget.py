@@ -188,6 +188,8 @@ def test_nothing_is_counted_outside_the_gateway_or_when_off(monkeypatch):
         "over_budget": 0,
         "cold_over_budget": 0,
         "max_records": 0,
+        "raised": 0,
+        "allowed": 0,
         "mode": "off",
         "k": read_budget.K,
     }

@@ -225,12 +225,19 @@ def _conductor_asks(slot: str, item_ids: set[str]) -> dict[str, list[str]]:
     ``{item_id: {options: [...]}}`` as the conductor wrote it with ``dashboard_write``,
     read from the slot's own ``agentic`` fold (the value its page is filled from), and
     cut to this board's items and to non-empty strings. FILE I/O -- call off the loop.
-    TOTAL: a fold that cannot be read, or holds no ``asks``, answers ``{}``.
+    TOTAL: a fold that cannot be read, or holds no ``asks``, answers ``{}``. A slot with
+    no warm cell and no savepoint is folded here, as before, and its fold is also queued
+    for the background prime (``slot_prime``), which a later read finds warm.
     """
     try:
-        from kiro_crew.crew_log import projection
+        from kiro_crew.crew_log import projection, slot_prime
+        from kiro_crew.crew_log.projection_slot_memo import SlotFoldNotReady
 
-        value = projection.read_slot_projection(slot, "agentic").value
+        try:
+            value = projection.read_slot_projection(slot, "agentic", cold=False).value
+        except SlotFoldNotReady:
+            slot_prime.schedule(slot, "agentic", for_reader=True)
+            value = projection.read_slot_projection(slot, "agentic").value
         fields = value.get("fields") if isinstance(value, Mapping) else None
         row = fields.get("asks") if isinstance(fields, Mapping) else None
         asks = row.get("value") if isinstance(row, Mapping) else None
