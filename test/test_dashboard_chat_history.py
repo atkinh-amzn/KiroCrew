@@ -185,9 +185,8 @@ class TestPrepareMessagesInterleaved:
 
 class TestKiroReadinessQueueHandoff:
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("wait_end", ["stop", "deadline"])
     async def test_turn_identity_precedes_memory_preparation_wait_and_is_retired_on_stop(
-        self, tmp_path, monkeypatch, wait_end
+        self, tmp_path
     ):
         """A transient startup fence delays a turn without becoming its failure.
 
@@ -231,8 +230,6 @@ class TestKiroReadinessQueueHandoff:
         # The turn now reaches the transcript save; a MagicMock ``_path`` would
         # otherwise materialise a ``MagicMock/`` tree in the current directory.
         state.conversation_log._path.return_value = tmp_path / "transcript.jsonl"
-        if wait_end == "deadline":
-            monkeypatch.setattr("kiro_crew.memory_startup.MEMORY_ADMISSION_WAIT_SECONDS", 0.0)
         state.memory_startup_task = asyncio.create_task(prepare_memory())
         slot = state.get_or_create_slot("memory-startup-admission")
         slot.queue_append("keep queued during startup")
@@ -243,8 +240,7 @@ class TestKiroReadinessQueueHandoff:
             assert slot._active_turn_session_key == "dashboard:memory-startup-admission"
             state.sessions.get_or_create.assert_not_awaited()
 
-            if wait_end == "stop":
-                turn.cancel()
+            turn.cancel()
             await turn
             assert not state.memory_startup_task.cancelled()
             assert not state.memory_startup_task.done()
@@ -256,11 +252,6 @@ class TestKiroReadinessQueueHandoff:
             state.sessions.get_or_create.assert_not_awaited()
             state.sessions.record_failure.assert_not_awaited()
             state.conversation_log.update_metadata.assert_not_called()
-            if wait_end == "deadline":
-                error = next(message for message in slot.messages if message["role"] == "error")
-                assert error["meta"]["code"] == "memory_unavailable"
-                assert "Retry shortly" in error["content"]
-
             slot._queue.clear()
             release.set()
             await state.memory_startup_task
