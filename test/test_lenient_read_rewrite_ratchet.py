@@ -57,6 +57,12 @@ import functools
 import re
 from pathlib import Path
 
+import pytest
+
+#: One worker runs the tree-wide tests and pays for the scan once per run (testing
+#: conventions, "A module-cached walk that is still paid once per worker").
+pytestmark = pytest.mark.xdist_group(name="tree_scan_lenient_read_rewrite_ratchet")
+
 _SRC = Path(__file__).resolve().parent.parent / "src"
 
 #: Caught by a handler, these mean "a read error other than a missing file".
@@ -208,6 +214,11 @@ class _Module:
                 fn.qual.rpartition(".")[2] for fn in self.functions if is_lenient_reader(fn)
             }
 
+    def release(self) -> None:
+        """Drop the syntax tree and keep ``readers``: a later ``parse`` rebuilds it."""
+        self.tree = None
+        self.functions = []
+
 
 def _imports(module: _Module, modules: dict[str, _Module]) -> tuple[dict[str, str], set[str]]:
     """``(alias -> imported project module, names bound to an imported lenient reader)``."""
@@ -298,12 +309,15 @@ def rewrites_from_lenient_reads(modules: dict[str, _Module]) -> dict[str, list[i
     """``<rel path>::<function>`` -> lines of each write fed by a lenient read.
 
     Two passes: modules that can define a reader are parsed first, then only the
-    modules that both call a writer and name one of the readers found.
+    modules that both call a writer and name one of the readers found. A module's
+    tree is released as soon as its pass is done, so one tree is held at a time
+    rather than every parsed module's at once (~1.2 GiB for ``src/``).
     """
     for module in modules.values():
         text = module.text
         if text is not None and _HANDLER_GATE.search(text) and _EMPTY_GATE.search(text):
             module.parse()
+            module.release()
     names = sorted({name for module in modules.values() for name in module.readers})
     if not names:
         return {}
@@ -315,6 +329,7 @@ def rewrites_from_lenient_reads(modules: dict[str, _Module]) -> dict[str, list[i
             continue
         module.parse()
         found.update(_scan_module(module, modules))
+        module.release()
     return {key: sorted(lines) for key, lines in found.items()}
 
 
@@ -332,10 +347,15 @@ def load_modules(root: Path, sources: dict[str, str] | None = None) -> dict[str,
 
 
 @functools.cache
-def _src_scan() -> tuple[dict[str, _Module], dict[str, list[int]]]:
-    """``src/`` is read once per worker for every tree-wide test."""
+def _src_scan() -> tuple[dict[str, frozenset[str]], dict[str, list[int]]]:
+    """``(module name -> its lenient readers, the rewrites found)`` for ``src/``.
+
+    Read once per worker for every tree-wide test. Only the answers are cached, not
+    the ~100 MB of source text the scan reads.
+    """
     modules = load_modules(_SRC)
-    return modules, rewrites_from_lenient_reads(modules)
+    found = rewrites_from_lenient_reads(modules)
+    return {name: frozenset(module.readers) for name, module in modules.items()}, found
 
 
 def test_no_new_rewrite_starts_from_a_lenient_read() -> None:
@@ -360,13 +380,13 @@ def test_every_known_site_still_matches() -> None:
 
 
 def test_the_scan_still_sees_the_real_lenient_readers() -> None:
-    modules, _ = _src_scan()
+    readers, _ = _src_scan()
     for module, reader in (
         ("kiro_crew.apps.builtins.ops_mission_control.backend.ledger", "read_entries"),
         ("kiro_crew.aws_consent", "_read_all"),
         ("kiro_crew.mate_tool_access", "_read"),
     ):
-        assert reader in modules[module].readers, f"the scan no longer sees {module}.{reader}"
+        assert reader in readers[module], f"the scan no longer sees {module}.{reader}"
     for module, reader in (
         ("kiro_crew.apps.builtins.ops_mission_control.backend.ledger", "read_entries_for_update"),
         (
@@ -374,7 +394,7 @@ def test_the_scan_still_sees_the_real_lenient_readers() -> None:
             "_read_state_for_update",
         ),
     ):
-        assert reader not in modules[module].readers, f"{module}.{reader} is strict"
+        assert reader not in readers[module], f"{module}.{reader} is strict"
 
 
 _LENIENT = """
@@ -484,3 +504,15 @@ def c():
         return {"default": 1}
 """
     assert [fn.qual for fn in _index(ast.parse(sources)) if is_lenient_reader(fn)] == []
+
+
+def test_the_scan_keeps_no_syntax_tree_once_it_answers() -> None:
+    # Every parsed tree of src/ held at once is ~1.2 GiB of one worker's memory for the
+    # rest of its run, enough to push a CI shard's host out of memory.
+    body = "def put(k, v):\n    data = _read()\n    data[k] = v\n    _write(data)\n"
+    # pkg.view defines readers and writes nothing, so only the first pass parses it.
+    sources = {"pkg/__init__.py": "", "pkg/store.py": _LENIENT + body, "pkg/view.py": _LENIENT}
+    modules = load_modules(_SRC, sources)
+    assert rewrites_from_lenient_reads(modules) == {"pkg/store.py::put": [18]}
+    assert modules["pkg.store"].readers == modules["pkg.view"].readers == {"_read", "_read_list"}
+    assert [name for name, module in modules.items() if module.tree is not None] == []
